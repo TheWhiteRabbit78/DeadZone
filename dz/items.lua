@@ -134,7 +134,19 @@ local function parseMods(mods, where)
 end
 I.parseMods = parseMods
 
+-- endless small upgrades offered once the item pool runs dry
+I.FILLERS = {
+  { id = "shard_dmg",  name = "Power Shard",  rarity = "common", max = 999, mods = { dmg_pct = 0.04 },   lines = { "+4% all damage", "(endless)" } },
+  { id = "shard_hp",   name = "Vital Shard",  rarity = "common", max = 999, mods = { maxhp = 2 },        lines = { "+2 max HP", "(endless)" }, heal = 2 },
+  { id = "shard_rate", name = "Haste Shard",  rarity = "common", max = 999, mods = { rate_pct = 0.03 },  lines = { "+3% fire rate", "(endless)" } },
+  { id = "shard_area", name = "Rune Shard",   rarity = "common", max = 999, mods = { aoedmg_pct = 0.05 }, lines = { "+5% area damage", "(endless)" } },
+}
+
 I.byId = { snack = I.SNACK }
+for _, it in ipairs(I.FILLERS) do
+  I.byId[it.id] = it
+  it.parsed = parseMods(it.mods, "filler " .. it.id)
+end
 for _, it in ipairs(I.LIST) do
   I.byId[it.id] = it
   it.parsed = parseMods(it.mods, "item " .. it.id)
@@ -211,6 +223,12 @@ function I.roll(owned, luck, n, minRarity, banned, exclude)
     end
     picks[#picks + 1] = table.remove(pool, idx).it
   end
+  -- pool ran dry: endless shards, then snacks
+  local fill = {}
+  for _, f in ipairs(I.FILLERS) do
+    if not (exclude and exclude[f.id]) then fill[#fill + 1] = f end
+  end
+  while #picks < n and #fill > 0 do picks[#picks + 1] = table.remove(fill, math.random(#fill)) end
   while #picks < n do picks[#picks + 1] = I.SNACK end
   return picks
 end

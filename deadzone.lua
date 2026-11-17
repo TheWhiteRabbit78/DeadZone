@@ -29,7 +29,7 @@ local sin, cos, pi = math.sin, math.cos, math.pi
 local atan2 = math.atan2 or math.atan
 
 local TPS = 20
-local MAX_MOBS = 150
+local MAX_MOBS = 160
 local S = P.slot
 local HEX = G.HEX
 
@@ -136,10 +136,17 @@ local UI = { msg = "", msgCol = S.Y, msgTimer = 0, shake = 0, treeSel = "root", 
 local grid = {}
 
 local function secs() return R.tick / TPS end
-local function hpMul(s) return (1 + 0.25 * (s / 60) ^ 1.4) * Tree.prestigeMobHp(prof.prestige) end
+-- difficulty: gentle start, then compounding after minute 4
+local function hpMul(s)
+  local m = s / 60
+  return (1 + 0.3 * m ^ 1.5) * 1.2 ^ max(0, m - 4) * 1.12 ^ max(0, m - 10) * Tree.prestigeMobHp(prof.prestige)
+end
 local function speedMul(s) return (1 + min(0.45, s / 800)) * Tree.prestigeMobSpeed(prof.prestige) end
-local function dmgAdd(s) return floor(s / 240) end
-local function xpFor(l) return floor(5 + l * 4 + l ^ 1.8) end
+local function mobDmg(s) return 1 + 0.15 * (s / 60) end                         -- mob hits +15% per minute
+local function mobRes(s) return min(0.7, 0.03 * max(0, s / 60 - 3)) end       -- damage resistance
+local function eliteChance(s) return (s < 300) and 0 or min(0.35, 0.04 * (s / 60 - 4)) end
+local function mobCap(s) return 160 + min(20, floor(2 * s / 60)) end
+local function xpFor(l) return floor(5 + l * 4 + l ^ 2) end
 local function say(t, ticks, col) UI.msg, UI.msgTimer, UI.msgCol = t, ticks or 60, col or S.Y end
 
 local function removeAt(list, i)
@@ -187,7 +194,7 @@ local function newRun()
     spawnTimer = 20, nextHorde = 60 * TPS, nextBoss = 180 * TPS, boss = nil,
     announced = { zombie = true }, rerolls = 0, banishes = 0, banned = {},
     offers = nil, offerKind = nil, banishMode = false,
-    deadTimer = 0, newBest = false, soulsEarned = 0, mult = 1,
+    deadTimer = 0, newBest = false, soulsEarned = 0, mult = 1, res = 0, nextSwarm = 360 * TPS, boomQ = {},
     spell = { meteor = 0, frost = 0, thunder = 0, orbs = 0, mortar = 0, ring = 0, fire = 0 },
   }
   owned = {}
@@ -219,7 +226,7 @@ end
 
 ---------------------------------------------------------------------- particles
 local function addPart(x, y, vx, vy, life, col)
-  if #parts < 350 then parts[#parts + 1] = { x = x, y = y, vx = vx, vy = vy, life = life, col = col } end
+  if #parts < 260 then parts[#parts + 1] = { x = x, y = y, vx = vx, vy = vy, life = life, col = col } end
 end
 
 local function burst(x, y, n, col, spd)
@@ -318,7 +325,7 @@ end
 function C.damageMob(m, dmg, kx, ky, raw)
   if m.dead then return end
   if not raw then
-    dmg = dmg * R.mult
+    dmg = dmg * R.mult * (1 - R.res)
     if (m.shockT or 0) > 0 then dmg = dmg * (1.25 + stats.conductor) end
     if (m.burnT or 0) > 0 and stats.pyro > 0 then dmg = dmg * (1 + stats.pyro) end
     if ((m.frozenT or 0) > 0 or (m.chillT or 0) > 0) and stats.permafrost > 0 then dmg = dmg * (1 + stats.permafrost) end
@@ -361,7 +368,7 @@ function C.explode(x, y, rad, dmg, o)
   end
   if o.hurts then
     local dx, dy = p.x - x, (p.y - 6) - y
-    if dx * dx + dy * dy <= rad * rad then C.hurtPlayer(3 + dmgAdd(secs())) end
+    if dx * dx + dy * dy <= rad * rad then C.hurtPlayer(3 * mobDmg(secs())) end
   end
   local cols = { S.O, S.Y, S.R, S.W }
   local n = o.small and 5 or floor(10 + rad)
@@ -390,8 +397,8 @@ function C.explode(x, y, rad, dmg, o)
     if stats.chainreact > 0 and depth < 3 and random() < stats.chainreact then
       local t = nearestMob(x + random(-40, 40), y + random(-30, 30), 70)
       if t then
-        strikes[#strikes + 1] = { x = t.x, y = t.y - 6, t = 6, rad = rad / stats.area, dmg = dmg / (stats.aoedmg * stats.boom),
-          depth = depth + 1, kind = "chain" }
+        if #strikes < 40 then strikes[#strikes + 1] = { x = t.x, y = t.y - 6, t = 6, rad = rad / stats.area, dmg = dmg / (stats.aoedmg * stats.boom),
+          depth = depth + 1, kind = "chain" } end
       end
     end
   end
@@ -458,8 +465,8 @@ function C.killMob(m)
   if m.dead then return end
   m.dead = true
   R.kills = R.kills + 1
-  R.score = R.score + m.def.score
-  C.dropGem(m.x, m.y - 4, m.def.xp * (1 + secs() / 240))
+  R.score = R.score + m.def.score * (m.elite and 3 or 1)
+  C.dropGem(m.x, m.y - 4, m.def.xp * (1 + secs() / 400) * (m.elite and 4 or 1))
   burst(m.x, m.y - 6, 8, DEATH_COL[m.kind] or S.R, 1.4)
   burst(m.x, m.y - 6, 4, S.R, 0.8)
   sfx("kill")
@@ -484,9 +491,9 @@ function C.killMob(m)
   end
   if m.def.bomb and not m.exploded then
     m.exploded = true
-    C.explode(m.x, m.y - 6, 26, 10 * hpMul(secs()), {})
-  elseif stats.corpse > 0 and random() < stats.corpse then
-    C.explode(m.x, m.y - 6, 18, m.maxHp * 0.6, { player = true })
+    if #R.boomQ < 60 then R.boomQ[#R.boomQ + 1] = { m.x, m.y - 6, 26, 25, false } end
+  elseif stats.corpse > 0 and random() < stats.corpse and #R.boomQ < 60 then
+    R.boomQ[#R.boomQ + 1] = { m.x, m.y - 6, 18, m.def.hp * 2 + 6, true }
   end
 end
 
@@ -498,6 +505,11 @@ function C.spawnMob(kind, x, y)
     hp = d.hp * hpMul(s), speed = d.speed * speedMul(s) * (0.9 + random() * 0.2),
     flash = 0, cd = random(30, 70), phase = random(0, 11), flip = false,
   }
+  if not d.boss and kind ~= "bomb_imp" and random() < eliteChance(s) then
+    m.elite = true
+    m.hp = m.hp * 4
+    m.speed = m.speed * 1.1
+  end
   m.maxHp = m.hp
   mobs[#mobs + 1] = m
   return m
@@ -696,7 +708,7 @@ function C.updatePlayer()
   if p.fx < -0.1 then p.flip = true elseif p.fx > 0.1 then p.flip = false end
 
   if p.cd > 0 then p.cd = p.cd - 1 end
-  if shooting and p.cd <= 0 and #bullets < 300 then C.fire() end
+  if shooting and p.cd <= 0 and #bullets < 220 then C.fire() end
   if p.iframes > 0 then p.iframes = p.iframes - 1 end
   if p.retalT > 0 then p.retalT = p.retalT - 1 end
   if stats.shield >= 1 and p.shieldT < C.shieldCd() then p.shieldT = p.shieldT + 1 end
@@ -764,7 +776,7 @@ function C.updateMobs()
             local sx, sy = m.x, m.y - 8
             local tx, ty = p.x - sx, p.y - 7 - sy
             local l = sqrt(tx * tx + ty * ty)
-            eshots[#eshots + 1] = { x = sx, y = sy, vx = tx / l * 2.6, vy = ty / l * 2.6, life = 48, dmg = 1 + dmgAdd(s) }
+            eshots[#eshots + 1] = { x = sx, y = sy, vx = tx / l * 2.6, vy = ty / l * 2.6, life = 48, dmg = 1 * mobDmg(s) * (m.elite and 1.5 or 1) }
           end
         end
 
@@ -774,7 +786,7 @@ function C.updateMobs()
             mv = mv * 0.3
             if m.fuse <= 0 then
               m.exploded = true
-              C.explode(m.x, m.y - 6, 28, 10 * hpMul(s), { hurts = true })
+              C.explode(m.x, m.y - 6, 28, 25, { hurts = true })
               m.fuse = nil
               C.killMob(m)
             end
@@ -800,7 +812,8 @@ function C.updateMobs()
           m.moving = mv ~= 0
 
           local r = d.r
-          forNear(m.x, m.y, 1, function(o)
+          -- separation runs every other tick per mob (halves the cost with big hordes)
+          if (frame + m.phase) % 2 == 0 then forNear(m.x, m.y, 1, function(o)
             if o ~= m then
               local ox, oy = m.x - o.x, m.y - o.y
               local rr = r + o.def.r - 2
@@ -815,12 +828,12 @@ function C.updateMobs()
                 end
               end
             end
-          end)
+          end) end
 
           if m.atk and m.atk > 0 then m.atk = m.atk - 1 end
           if not d.bomb and dist < r + 5 and (m.atk or 0) <= 0 and (m.frozenT or 0) <= 0 then
             local before = p.hp
-            C.hurtPlayer(d.dmg + dmgAdd(s))
+            C.hurtPlayer(d.dmg * mobDmg(s) * (m.elite and 1.5 or 1))
             if p.hp < before then
               m.atk = d.heavy and 40 or 20
               if d.heavy then
@@ -1122,7 +1135,7 @@ function C.updateSpawns()
     R.spawnTimer = max(5, floor((34 - s / 10) / stats.spawn))
     local batch = 1 + floor(s / 90)
     for _ = 1, batch do
-      if #mobs < MAX_MOBS then
+      if #mobs < mobCap(s) then
         local x, y = C.spawnPos()
         if x then C.spawnMob(C.pickType(s), x, y) end
       end
@@ -1133,9 +1146,20 @@ function C.updateSpawns()
     R.nextHorde = R.nextHorde + 60 * TPS
     say("A HORDE APPROACHES!", 70, S.R)
     for _ = 1, 16 + floor(s / 30) * 2 do
-      if #mobs < MAX_MOBS + 40 then
+      if #mobs < mobCap(s) + 40 then
         local x, y = C.spawnPos()
         if x then C.spawnMob((s >= 40 and random() < 0.35) and "ghoul" or "zombie", x, y) end
+      end
+    end
+  end
+
+  if R.tick >= R.nextSwarm then
+    R.nextSwarm = R.nextSwarm + 120 * TPS
+    say("SWARM!", 70, S.R)
+    for _ = 1, 30 + floor(s / 60) * 3 do
+      if #mobs < mobCap(s) + 60 then
+        local x, y = C.spawnPos()
+        if x then C.spawnMob((random() < 0.5) and "ghoul" or "zombie", x, y) end
       end
     end
   end
@@ -1239,6 +1263,16 @@ end
 local function update()
   R.tick = R.tick + 1
   R.mult = C.runMult()
+  R.res = mobRes(secs())
+  if #R.boomQ > 0 then
+    local q = R.boomQ
+    R.boomQ = {}
+    for i = 1, #q do
+      local b = q[i]
+      if i <= 25 then C.explode(b[1], b[2], b[3], b[4], { player = b[5] })
+      elseif #R.boomQ < 60 then R.boomQ[#R.boomQ + 1] = b end
+    end
+  end
   buildGrid()
   C.updatePlayer()
   C.updateBullets()
@@ -1414,6 +1448,7 @@ local function renderWorld()
       if m.flash > 0 then tint = S.W end
       if m.fuse and m.fuse % 4 < 2 then tint = S.W end
       if m.def.ranged and m.cd < 10 and frame % 4 < 2 then tint = S.Y end
+      if m.elite and not tint and (frame + m.phase) % 10 < 3 then tint = S.O end
       addDraw(sp, x, y + bob, m.flip, tint, m.y)
     end
   end
@@ -1499,6 +1534,8 @@ local function renderHUD()
   T(5, 1, (" "):rep(20), ("0"):rep(20), table.concat(bgs))
   local info = ("%d/%d   LV %d   %s   Kills %d   Score %d"):format(ceil(p.hp), p.maxHp, p.level, fmtTime(secs()), R.kills, R.score)
   T(27, 1, info, S.W)
+  local threat = ("Undead HP x%.1f  res %d%%"):format(hpMul(secs()), floor(R.res * 100 + 0.5))
+  T(CW - 60, 1, threat, S.O)
   local who = prof.name .. (prof.prestige > 0 and (" P" .. prof.prestige) or "")
   T(CW - #who, 1, who, S.Y)
 
@@ -1946,13 +1983,6 @@ local function main()
       if state == "dead" then R.deadTimer = R.deadTimer + 1 end
       if state ~= "play" and UI.msgTimer > 0 then UI.msgTimer = UI.msgTimer - 1 end
       if UI.prestigeArm > 0 then UI.prestigeArm = UI.prestigeArm - 1 end
-      -- auto login: exactly one player standing near the Player Detector
-      if detector and frame % 40 == 0 and (state == "title" or state == "dead" or state == "tree") then
-        local ok, list = pcall(detector.getPlayersInRange, 5)
-        if ok and type(list) == "table" and #list == 1 and type(list[1]) == "string" then
-          login(list[1])
-        end
-      end
       render()
     elseif e == "key" then
       held[ev[2]] = true
@@ -1967,6 +1997,8 @@ local function main()
         login(ev[2])
         if state == "naming" then state = "title" end
       end
+    elseif e == "dz_login" then
+      if state == "title" or state == "dead" or state == "tree" then login(ev[2]) end
     elseif e == "peripheral" or e == "peripheral_detach" then
       findDetector()
       drawController()
@@ -1976,7 +2008,29 @@ local function main()
   end
 end
 
-local ok, err = pcall(main)
+-- the Player Detector is asked in a separate coroutine: its calls wait on the
+-- server and would otherwise swallow the game's timer and key events
+local function detectorLoop()
+  while running do
+    if detector and (state == "title" or state == "dead" or state == "tree") then
+      local ok, list = pcall(detector.getPlayersInRange, 5)
+      if ok and type(list) == "table" and #list == 1 and type(list[1]) == "string" then
+        os.queueEvent("dz_login", list[1])
+      end
+    end
+    sleep(2)
+  end
+end
+
+local ok, err = xpcall(function() parallel.waitForAny(main, detectorLoop) end, debug and debug.traceback or nil)
+if not ok then
+  pcall(function()
+    local f = fs.open("/" .. dir .. "/crash.log", "w")
+    f.write(os.date and (tostring(os.date()) .. "\n") or "")
+    f.write(tostring(err))
+    f.close()
+  end)
+end
 P.restore(out)
 out.setBackgroundColour(colours.black)
 out.clear()
@@ -1985,5 +2039,14 @@ native.setBackgroundColour(colours.black)
 native.setTextColour(colours.white)
 native.clear()
 native.setCursorPos(1, 1)
-if not ok then printError(err) end
-print("Thanks for playing DEAD ZONE!")
+if not ok then
+  printError(err)
+  print("Saved to /" .. dir .. "/crash.log - send it to Claude")
+  pcall(function()
+    out.setTextColour(colours.red)
+    out.setCursorPos(2, 2)
+    out.write("DEAD ZONE crashed - details on the computer screen and in crash.log")
+  end)
+else
+  print("Thanks for playing DEAD ZONE!")
+end
