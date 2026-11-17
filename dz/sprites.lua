@@ -258,4 +258,172 @@ S.meteor = {
   "..O..",
 }
 
+-- friendlies, outposts, nests, lake decor
+S.soldier = {
+  "...KKKKK.....",
+  "..KAAAAAK....",
+  ".KAAAAAAAK...",
+  "..KSSKSSK....",
+  "..KSSSSSK....",
+  "...KKKKK.....",
+  "..KDDDDDK....",
+  ".KDYDYDDSKKKK",
+  ".KDDDDDDDDDDK",
+  ".KDDDDDKKKKK.",
+  "..KBBBBBK....",
+  "..KBBKBBK....",
+  "..KBBKBBK....",
+  "..KKK.KKK....",
+}
+
+S.mg_nest = {
+  "......KKKKK.........",
+  ".....KAAAAAK........",
+  "....KAAAAAAAK.......",
+  ".....KSSKSSK..KKKKKK",
+  ".....KSSSSSKKKDDDDDK",
+  "...KKKKKKKKKKDDKKKKK",
+  "..KSNSSNSSNSSNSK....",
+  ".KSSNSSNSSNSSNSSK...",
+  ".KNNKNNKNNKNNKNNK...",
+  "KSSNSSNSSNSSNSSNSK..",
+  "KSSSSSSSSSSSSSSSSK..",
+  "KKKKKKKKKKKKKKKKKK..",
+}
+
+S.survivor = {
+  "...KKKKK....",
+  "..KNNNNNK...",
+  "..KNSSSSK...",
+  "..KSKSKSK...",
+  "..KSSSSSK...",
+  "KK.KKKKK.KK.",
+  "KSKOOOOOKSK.",
+  ".KKOOOOOKK..",
+  "..KOOOOOK...",
+  "..KOOOOOK...",
+  "..KDDDDDK...",
+  "..KDDKDDK...",
+  "..KDDKDDK...",
+  "..KKK.KKK...",
+}
+
+S.help = {
+  "KKK",
+  "KYK",
+  "KYK",
+  "KYK",
+  "KKK",
+  "KYK",
+  "KKK",
+}
+
+S.follower = {
+  "...KKKKK....",
+  "..KNNNNNK...",
+  "..KNSSSSK...",
+  "..KSSKSSK...",
+  "..KSSSSSK...",
+  "...KKKKK....",
+  "..KOOOOOK...",
+  ".KOOOOOSKKK.",
+  ".KOOOOODDDK.",
+  ".KOOOOOKKK..",
+  "..KDDDDDK...",
+  "..KDDKDDK...",
+  "..KDDKDDK...",
+  "..KKK.KKK...",
+}
+
+S.tent = {
+  "........K.........",
+  ".......KAK........",
+  "......KWWAK.......",
+  ".....KWWWWAK......",
+  "....KWWWWWWAK.....",
+  "...KWWWKKKWWAK....",
+  "..KWWWKDDDKWWAK...",
+  ".KWWWKDDDDDKWWAK..",
+  "KWWWKDDDDDDDKWWAK.",
+  "KKKKKKKKKKKKKKKKK.",
+}
+
+S.flag = {
+  "K......",
+  "ACCCCK.",
+  "ACWWCK.",
+  "ACCCCK.",
+  "AKKKK..",
+  "A......",
+  "A......",
+  "A......",
+  "A......",
+  "A......",
+  "KAK....",
+  "KKK....",
+}
+
+S.crate = {
+  "KKKKKKKK",
+  "KNBNNBNK",
+  "KBNBBNBK",
+  "KNBNNBNK",
+  "KBNBBNBK",
+  "KNBNNBNK",
+  "KKKKKKKK",
+}
+
+S.sandbags = {
+  ".KKKKKKKKKKKKKK.",
+  "KSSNSSNSSNSSNSSK",
+  "KNNKNNKNNKNNKNNK",
+  "KSSNSSNSSNSSNSSK",
+  "KKKKKKKKKKKKKKKK",
+}
+
+S.nest = {
+  ".......KKKK.........",
+  ".....KKZZZZKK.......",
+  "...KKZZDDDDZZKK.....",
+  "..KZZDDRDDRDDZZK....",
+  ".KZDDDDDDDDDDDDZK...",
+  "KZDDWDDDKKDDDWDDZK..",
+  "KZDWWWDKKKKDWWWDZK..",
+  "KZZDDDDKKKKDDDDZZK..",
+  ".KKZZZZZZZZZZZZKK...",
+  "...KKKKKKKKKKKK.....",
+}
+
+S.ruined_tent = {
+  ".......K..........",
+  "......KAK.........",
+  ".....KWWAK...K....",
+  "....KWWZWAK.KZK...",
+  "...KWZZKKWAKZZK...",
+  "..KWWZKDDKZZWAK...",
+  ".KWWKDDDDDKZWWAK..",
+  "KZZKDDDDDDDKZZWAK.",
+  "KKKKKKKKKKKKKKKKK.",
+}
+
+S.reed = {
+  ".B.B",
+  ".B.B",
+  ".L.L",
+  "L.LL",
+  ".LL.",
+}
+
+S.lily = {
+  ".gg.",
+  "ggYg",
+  "gggg",
+  ".gg.",
+}
+
+S.sparkle = {
+  "CC.",
+  ".CC",
+}
+
 return S

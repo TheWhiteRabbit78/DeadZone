@@ -91,6 +91,7 @@ local MOBS = {
   skeleton = { spr = "skeleton", hp = 9,   speed = 0.5,  dmg = 1, xp = 2,  score = 25,   r = 5,  unlock = 150, ranged = true, intro = "SKELETONS - watch for arrows!" },
   bomb_imp = { spr = "bomb_imp", hp = 7,   speed = 0.9,  dmg = 3, xp = 2,  score = 25,   r = 5,  unlock = 210, bomb = true, intro = "BOMB IMPS - keep your distance!" },
   boss     = { spr = "boss",     hp = 500, speed = 0.5,  dmg = 3, xp = 60, score = 1000, r = 11, heavy = true, boss = true },
+  nest     = { spr = "nest",     hp = 90,  speed = 0,    dmg = 0, xp = 25, score = 300,  r = 9,  heavy = true, static = true },
 }
 local SPAWN_ORDER = { "zombie", "ghoul", "brute", "skeleton", "bomb_imp" }
 local DEATH_COL = { zombie = S.Z, ghoul = S.A, brute = S.Z, skeleton = S.W, bomb_imp = S.R, boss = S.W }
@@ -145,6 +146,7 @@ local function speedMul(s) return (1 + min(0.45, s / 800)) * Tree.prestigeMobSpe
 local function mobDmg(s) return 1 + 0.15 * (s / 60) end                         -- mob hits +15% per minute
 local function mobRes(s) return min(0.7, 0.03 * max(0, s / 60 - 3)) end       -- damage resistance
 local function eliteChance(s) return (s < 300) and 0 or min(0.35, 0.04 * (s / 60 - 4)) end
+local function allyScale(s) return 1 + 0.12 * (s / 60) end   -- soldiers/followers grow slower than mobs
 local function mobCap(s) return 160 + min(20, floor(2 * s / 60)) end
 local function xpFor(l) return floor(5 + l * 4 + l ^ 2) end
 local function say(t, ticks, col) UI.msg, UI.msgTimer, UI.msgCol = t, ticks or 60, col or S.Y end
@@ -196,6 +198,8 @@ local function newRun()
     offers = nil, offerKind = nil, banishMode = false,
     deadTimer = 0, newBest = false, soulsEarned = 0, mult = 1, res = 0, nextSwarm = 360 * TPS, boomQ = {},
     spell = { meteor = 0, frost = 0, thunder = 0, orbs = 0, mortar = 0, ring = 0, fire = 0 },
+    outposts = {}, activeOutposts = {}, followers = {}, survivor = nil, nextSurvivor = 50 * TPS,
+    rescued = 0, nestsCleared = 0,
   }
   owned = {}
   mobs, bullets, eshots, gems, pickups, parts, beams, strikes, fires, orbs = {}, {}, {}, {}, {}, {}, {}, {}, {}, {}
@@ -470,6 +474,14 @@ function C.killMob(m)
   burst(m.x, m.y - 6, 8, DEATH_COL[m.kind] or S.R, 1.4)
   burst(m.x, m.y - 6, 4, S.R, 0.8)
   sfx("kill")
+  if m.def.static and m.outpost then
+    m.outpost.state = "cleared"
+    R.nestsCleared = R.nestsCleared + 1
+    if random() < 0.35 then pickups[#pickups + 1] = { x = m.x, y = m.y + 10, kind = "chest", ttl = 99999 } end
+    pickups[#pickups + 1] = { x = m.x - 10, y = m.y + 8, kind = "heart", ttl = 60 * TPS }
+    say("Nest destroyed!", 60, S.g)
+    C.explode(m.x, m.y - 6, 26, 0, {})
+  end
   if m.def.boss then
     R.bossKills = R.bossKills + 1
     for i = 1, floor(stats.bosschests + 0.5) do
@@ -505,7 +517,7 @@ function C.spawnMob(kind, x, y)
     hp = d.hp * hpMul(s), speed = d.speed * speedMul(s) * (0.9 + random() * 0.2),
     flash = 0, cd = random(30, 70), phase = random(0, 11), flip = false,
   }
-  if not d.boss and kind ~= "bomb_imp" and random() < eliteChance(s) then
+  if not d.boss and not d.static and kind ~= "bomb_imp" and random() < eliteChance(s) then
     m.elite = true
     m.hp = m.hp * 4
     m.speed = m.speed * 1.1
@@ -643,6 +655,11 @@ function C.updateBullets()
           if dx * dx + dy * dy <= r * r then target = m; return true end
         end
       end)
+      if target and b.ally then
+        C.damageMob(target, b.dmg * (1 - R.res), b.vx, b.vy, true)
+        dead = true
+        break
+      end
       if target then
         C.bulletHit(b, target)
         if b.aoe then C.explode(b.x, b.y, b.aoe, b.aoeBase, { player = true }); dead = true; break end
@@ -692,7 +709,7 @@ function C.updatePlayer()
   p.vy = p.vy + (ty - p.vy) * 0.5
   if abs(tx - p.vx) < 0.06 then p.vx = tx end
   if abs(ty - p.vy) < 0.06 then p.vy = ty end
-  p.x, p.y = world.pushOut(p.x + p.vx + p.knx, p.y + p.vy + p.kny, 4)
+  p.x, p.y = C.pushStructures(world.pushOut(p.x + p.vx + p.knx, p.y + p.vy + p.kny, 4))
   p.knx, p.kny = p.knx * 0.7, p.kny * 0.7
   p.moving = (ix ~= 0 or iy ~= 0)
 
@@ -741,7 +758,9 @@ function C.updateMobs()
       local d = m.def
       local dx, dy = p.x - m.x, p.y - m.y
       local dist = sqrt(dx * dx + dy * dy)
-      if dist > 460 then
+      if d.static then
+        C.updateNest(m, s, dist)
+      elseif dist > 460 then
         if d.boss then
           local x, y = C.spawnPos()
           if x then m.x, m.y = x, y end
@@ -755,6 +774,27 @@ function C.updateMobs()
         if dist > 0.01 then nx, ny = dx / dist, dy / dist end
         m.flip = dx < 0
         local mv = m.speed
+
+        -- what to walk at: the player, a nearby outpost, or a trapped survivor
+        local siege, tdist = nil, dist
+        if m.guard and R.survivor == m.guard and dist > 50 then
+          local tx, ty = m.guard.x - m.x, m.guard.y - m.y
+          tdist = sqrt(tx * tx + ty * ty)
+          if tdist > 0.01 then nx, ny = tx / tdist, ty / tdist end
+          if tdist < 14 then mv = 0 end
+        elseif not d.boss then
+          for _, o in ipairs(R.activeOutposts) do
+            if o.state == "alive" then
+              local ox, oy = o.x - m.x, (o.y - 2) - m.y
+              local od = sqrt(ox * ox + oy * oy)
+              if od < 170 and od < dist * 0.8 then
+                siege, tdist = o, od
+                if od > 0.01 then nx, ny = ox / od, oy / od end
+                m.flip = ox < 0
+              end
+            end
+          end
+        end
 
         -- status effects
         if m.burnT and m.burnT > 0 then
@@ -808,7 +848,7 @@ function C.updateMobs()
         if not m.dead then
           m.x = m.x + nx * mv
           m.y = m.y + ny * mv
-          if not d.boss then m.x, m.y = world.pushOut(m.x, m.y, 3) end
+          if not d.boss then m.x, m.y = C.pushStructures(world.pushOut(m.x, m.y, 3)) end
           m.moving = mv ~= 0
 
           local r = d.r
@@ -831,6 +871,11 @@ function C.updateMobs()
           end) end
 
           if m.atk and m.atk > 0 then m.atk = m.atk - 1 end
+          if siege and tdist < d.r + 13 and (m.atk or 0) <= 0 and not d.bomb then
+            siege.hp = siege.hp - d.dmg * mobDmg(s) * (m.elite and 1.5 or 1)
+            m.atk = 20
+            addPart(siege.x + random(-6, 6), siege.y - 8, 0, -0.4, 5, S.R)
+          end
           if not d.bomb and dist < r + 5 and (m.atk or 0) <= 0 and (m.frozenT or 0) <= 0 then
             local before = p.hp
             C.hurtPlayer(d.dmg * mobDmg(s) * (m.elite and 1.5 or 1))
@@ -1260,6 +1305,211 @@ function C.gameOver()
   UI.board = Prof.leaderboard(10)
 end
 
+---------------------------------------------------------------------- outposts, nests, survivors, followers
+local SOLDIER_POS = { { -20, 4 }, { 2, 14 } }           -- soldier feet, relative to the camp centre
+local STRUCT_ALIVE = { { 0, -3, 8 }, { 32, -1, 8 } }    -- tent + MG nest block movement
+local STRUCT_RUIN = { { 0, -3, 7 } }
+local FOLLOW_SLOT = { { -16, 6 }, { 16, 8 } }
+local OUT_TMP = {}
+
+function C.pushStructures(x, y, r)
+  r = r or 4
+  for _, o in ipairs(R.activeOutposts) do
+    if o.state ~= "cleared" then
+      for _, c in ipairs(o.state == "alive" and STRUCT_ALIVE or STRUCT_RUIN) do
+        local cx, cy, cr = o.x + c[1], o.y + c[2], c[3] + r
+        local dx, dy = x - cx, y - cy
+        local d2 = dx * dx + dy * dy
+        if d2 < cr * cr then
+          local d = sqrt(d2)
+          if d < 0.01 then dx, dy, d = 1, 0, 1 end
+          x, y = cx + dx / d * cr, cy + dy / d * cr
+        end
+      end
+    end
+  end
+  return x, y
+end
+
+function C.allyShot(x, y, t, dmg, jitter)
+  if #bullets >= 260 then return end
+  local a = atan2((t.y - 6) - y, t.x - x) + (random() - 0.5) * jitter
+  local ca, sa = cos(a), sin(a)
+  bullets[#bullets + 1] = { x = x + ca * 4, y = y + sa * 4, vx = ca * 6, vy = sa * 6, life = 26, dmg = dmg,
+    pierce = 0, ric = 0, hit = {}, col = S.Y, ally = true }
+end
+
+function C.updateNest(m, s, dist)
+  if m.flash > 0 then m.flash = m.flash - 1 end
+  m.cd = m.cd - 1
+  if m.cd <= 0 and dist < 400 then
+    m.cd = 140
+    for _ = 1, 2 do
+      if #mobs < mobCap(s) + 20 then
+        C.spawnMob((random() < 0.4) and "ghoul" or "zombie", m.x + random(-16, 16), m.y + random(8, 16))
+      end
+    end
+    burst(m.x, m.y - 6, 5, S.Z, 1)
+  end
+end
+
+function C.updateOutposts(s)
+  if R.tick % 10 == 1 then
+    local n = world.outpostsNear(p.x, p.y, 340, OUT_TMP)
+    local act = {}
+    for i = 1, n do
+      local site = OUT_TMP[i]
+      local o = R.outposts[site.key]
+      if not o then
+        local mh = 80 * (1 + 0.2 * s / 60)
+        o = { x = site.x, y = site.y, hp = mh, maxHp = mh, state = "alive", cd = { 0, 7, 0 }, flip = { false, false, false } }
+        R.outposts[site.key] = o
+      end
+      act[#act + 1] = o
+    end
+    R.activeOutposts = act
+  end
+  local sc = allyScale(s)
+  for _, o in ipairs(R.activeOutposts) do
+    if o.state == "alive" then
+      for k, sp in ipairs(SOLDIER_POS) do
+        if o.hp > o.maxHp * (k - 1) / 2.5 then
+          o.cd[k] = o.cd[k] - 1
+          if o.cd[k] <= 0 then
+            local sx, sy = o.x + sp[1], o.y + sp[2] - 8
+            local t = nearestMob(sx, sy, 130)
+            if t then
+              o.cd[k] = 14
+              C.allyShot(sx, sy, t, 5 * sc, 0.06)
+              o.flip[k] = t.x < sx
+            end
+          end
+        end
+      end
+      if o.hp > o.maxHp * 0.3 then
+        o.cd[3] = o.cd[3] - 1
+        if o.cd[3] <= 0 then
+          local gx, gy = o.x + 40, o.y - 5
+          local t = nearestMob(gx, gy, 150)
+          if t then
+            o.cd[3] = 3
+            C.allyShot(gx, gy, t, 2.2 * sc, 0.15)
+            o.flip[3] = t.x < gx
+          end
+        end
+      end
+      if not o.warned and o.hp < o.maxHp * 0.5 then
+        o.warned = true
+        say("An outpost is under attack!", 50, S.O)
+      end
+      if o.hp <= 0 then
+        o.state = "nest"
+        local m = C.spawnMob("nest", o.x + 4, o.y + 4)
+        m.outpost = o
+        say("Outpost overrun - it's infested!", 70, S.R)
+        burst(o.x, o.y - 6, 14, S.Z, 2)
+      end
+    end
+  end
+end
+
+function C.updateSurvivor(s)
+  local sv = R.survivor
+  if not sv then
+    if R.tick >= R.nextSurvivor and #R.followers < 2 then
+      R.nextSurvivor = R.tick + random(75, 110) * TPS
+      for _ = 1, 10 do
+        local a = random() * 2 * pi
+        local x, y = p.x + cos(a) * 140, p.y + sin(a) * 100
+        local nx, ny = C.pushStructures(world.pushOut(x, y, 6))
+        if nx == x and ny == y then
+          sv = { x = x, y = y, hp = 10, ttl = 45 * TPS, hurtCd = 0 }
+          R.survivor = sv
+          local n = 4 + floor(s / 60)
+          for k = 1, n do
+            local b = k / n * 2 * pi
+            local m = C.spawnMob((s > 60 and random() < 0.3) and "ghoul" or "zombie", x + cos(b) * 26, y + sin(b) * 20)
+            m.guard = sv
+          end
+          say("A survivor needs help!  Look for the  !", 70, S.Y)
+          break
+        end
+      end
+    end
+    return
+  end
+  sv.ttl = sv.ttl - 1
+  if sv.hurtCd > 0 then sv.hurtCd = sv.hurtCd - 1 end
+  local threatened = false
+  forNear(sv.x, sv.y, 1, function(m)
+    local dx, dy = m.x - sv.x, m.y - sv.y
+    local d2 = dx * dx + dy * dy
+    if d2 < 900 then threatened = true end
+    if d2 < (m.def.r + 6) ^ 2 and sv.hurtCd <= 0 and not m.def.static then
+      sv.hp = sv.hp - mobDmg(s)
+      sv.hurtCd = 20
+      addPart(sv.x, sv.y - 8, 0, -0.5, 6, S.R)
+    end
+  end)
+  local pdx, pdy = p.x - sv.x, p.y - sv.y
+  if not threatened and pdx * pdx + pdy * pdy < 30 * 30 then
+    local mh = floor(12 * (1 + 0.1 * s / 60))
+    R.followers[#R.followers + 1] = { x = sv.x, y = sv.y, hp = mh, maxHp = mh, cd = 0, flip = false, hurtCd = 0, regen = 0 }
+    R.rescued = R.rescued + 1
+    R.survivor = nil
+    say(("Survivor rescued!  (%d/2 followers)"):format(#R.followers), 60, S.g)
+    sfx("pick")
+  elseif sv.hp <= 0 or sv.ttl <= 0 then
+    R.survivor = nil
+    R.nextSurvivor = R.tick + 60 * TPS
+    say("The survivor didn't make it...", 50, S.A)
+    burst(sv.x, sv.y - 6, 8, S.R, 1.2)
+  end
+end
+
+function C.updateFollowers(s)
+  local sc = allyScale(s)
+  for i = #R.followers, 1, -1 do
+    local f = R.followers[i]
+    local slot = FOLLOW_SLOT[i] or FOLLOW_SLOT[1]
+    local tx, ty = p.x + slot[1] - f.x, p.y + slot[2] - f.y
+    local d = sqrt(tx * tx + ty * ty)
+    if d > 200 then
+      f.x, f.y = p.x + slot[1], p.y + slot[2]
+    elseif d > 3 then
+      local sp = min(d * 0.25, 2.4 * stats.speed)
+      f.x, f.y = C.pushStructures(world.pushOut(f.x + tx / d * sp, f.y + ty / d * sp, 4))
+    end
+    f.moving = d > 3
+    f.cd = f.cd - 1
+    if f.cd <= 0 then
+      local t = nearestMob(f.x, f.y - 7, 120)
+      if t then
+        f.cd = 10
+        C.allyShot(f.x, f.y - 7, t, 4 * sc, 0.08)
+        f.flip = t.x < f.x
+      end
+    end
+    if f.hurtCd > 0 then f.hurtCd = f.hurtCd - 1 end
+    forNear(f.x, f.y, 1, function(m)
+      if f.hurtCd <= 0 and not m.def.static and m.def.dmg > 0 then
+        local dx, dy = m.x - f.x, m.y - f.y
+        if dx * dx + dy * dy < (m.def.r + 5) ^ 2 then
+          f.hp = f.hp - m.def.dmg * mobDmg(s)
+          f.hurtCd = 20
+        end
+      end
+    end)
+    f.regen = f.regen + 1
+    if f.regen >= 100 then f.regen = 0; f.hp = min(f.maxHp, f.hp + 1) end
+    if f.hp <= 0 then
+      table.remove(R.followers, i)
+      say("A follower has fallen", 50, S.R)
+      burst(f.x, f.y - 6, 10, S.R, 1.4)
+    end
+  end
+end
+
 local function update()
   R.tick = R.tick + 1
   R.mult = C.runMult()
@@ -1282,6 +1532,9 @@ local function update()
   C.updateSpellObjects()
   C.updatePickups()
   C.updateSpawns()
+  C.updateOutposts(secs())
+  C.updateSurvivor(secs())
+  C.updateFollowers(secs())
   C.updateFx()
   if state == "play" and (p.pending > 0 or p.bonus > 0) then C.nextPickOrPlay() end
 end
@@ -1392,6 +1645,7 @@ local function renderWorld()
   camY = floor(p.y - 7 + 0.5) - floor(PH / 2) + sy
 
   world.drawGround(scr, camX, camY)
+  world.drawLakeDecor(scr, camX, camY, frame)
 
   -- burning ground
   for _, f in ipairs(fires) do
@@ -1437,6 +1691,32 @@ local function renderWorld()
   -- depth-sorted sprites
   nDraw = 0
   world.propsInView(camX, camY, PW, PH, addDraw)
+  if R.activeOutposts then
+    for _, o in ipairs(R.activeOutposts) do
+      if o.state == "alive" then
+        addDraw(spr.tent, o.x - 9, o.y - 10, false, nil, o.y)
+        addDraw(spr.flag, o.x + 10, o.y - 18, false, nil, o.y - 7)
+        addDraw(spr.crate, o.x + 14, o.y - 8, false, nil, o.y - 1)
+        addDraw(spr.sandbags, o.x - 34, o.y + 6, false, nil, o.y + 11)
+        addDraw(spr.sandbags, o.x - 12, o.y + 18, false, nil, o.y + 23)
+        if o.hp > o.maxHp * 0.3 then addDraw(spr.mg_nest, o.x + 22, o.y - 8, o.flip[3], nil, o.y + 4) end
+        for k, sp in ipairs(SOLDIER_POS) do
+          if o.hp > o.maxHp * (k - 1) / 2.5 then
+            addDraw(spr.soldier, o.x + sp[1] - 6, o.y + sp[2] - 13, o.flip[k], nil, o.y + sp[2])
+          end
+        end
+      else
+        addDraw(spr.ruined_tent, o.x - 9, o.y - 9, false, nil, o.y - 1)
+      end
+    end
+    for _, f in ipairs(R.followers) do
+      local bob = (f.moving and frame % 8 < 4) and -1 or 0
+      addDraw(spr.follower, f.x - 6, f.y - 13 + bob, f.flip, (f.hurtCd > 14) and S.R or nil, f.y)
+    end
+    if R.survivor then
+      addDraw(spr.survivor, R.survivor.x - 6, R.survivor.y - 13, false, (R.survivor.hurtCd > 14) and S.R or nil, R.survivor.y)
+    end
+  end
   for _, m in ipairs(mobs) do
     local sp = spr[m.def.spr]
     local x, y = m.x - sp.w / 2, m.y - sp.h + 1
@@ -1463,6 +1743,37 @@ local function renderWorld()
   for i = 1, nDraw do
     local e = drawList[i]
     scr.sprite(e[1], e[2] - camX, e[3] - camY, e[4], e[5])
+  end
+
+  -- outpost HP bars
+  for _, o in ipairs(R.activeOutposts or {}) do
+    if o.state == "alive" and o.hp < o.maxHp then
+      local bx, by = o.x - 12 - camX, o.y - 26 - camY
+      local fill = floor(max(0, o.hp) / o.maxHp * 24)
+      scr.rect(bx, by, 24, 2, S.D)
+      if fill > 0 then scr.rect(bx, by, fill, 2, S.g) end
+    end
+  end
+  -- off-screen outposts nearby: flag marker on the screen edge
+  if frame % 20 < 14 then
+    local n = world.outpostsNear(p.x, p.y, 460, OUT_TMP)
+    for i = 1, n do
+      local site = OUT_TMP[i]
+      local o = R.outposts[site.key]
+      if not o or o.state == "alive" then
+        local fx, fy = site.x - camX, site.y - 10 - camY
+        if fx < 0 or fx > PW or fy < 0 or fy > PH then
+          scr.sprite(spr.flag, max(3, min(PW - 9, fx)), max(10, min(PH - 16, fy)))
+        end
+      end
+    end
+  end
+  -- survivor "!" (pinned to the screen edge when off-screen)
+  if R.survivor and frame % 10 < 7 then
+    local hx, hy = R.survivor.x - 1 - camX, R.survivor.y - 24 - camY
+    hx = max(3, min(PW - 6, hx))
+    hy = max(10, min(PH - 12, hy))
+    scr.sprite(spr.help, hx, hy)
   end
 
   -- energy shield bubble
@@ -1575,6 +1886,7 @@ local function renderHUD()
   local extra = ""
   if stats.shield >= 1 then extra = extra .. ((p.shieldT >= C.shieldCd()) and "SHIELD UP   " or "shield ...   ") end
   if stats.revive >= 1 then extra = extra .. ("Revives %d   "):format(floor(stats.revive + 0.5) - p.revUsed) end
+  if #R.followers > 0 then extra = extra .. ("Followers %d/2   "):format(#R.followers) end
   T(x + 2, CH, extra, S.C)
   T(CW - 18, CH, "P pause / build", S.A)
 end
@@ -1676,6 +1988,7 @@ local function renderDead()
     center(y0 + 9, "Best " .. prof.best, S.A)
   end
   center(y0 + 11, ("+%d souls   (total %d)"):format(R.soulsEarned, prof.souls), S.C)
+  center(y0 + 12, ("Survivors rescued %d    Nests destroyed %d"):format(R.rescued, R.nestsCleared), S.A)
   local items = ownedList()
   local names = {}
   for i, e in ipairs(items) do if i <= 6 then names[#names + 1] = e[1] end end

@@ -37,6 +37,10 @@ Keep the computer screen open while playing - it's the controller.
 - Damage types: **gun** (bullets) and **area** (explosions, aura, fire, spells) - items push one or the other
 - Build lines: guns, explosions (mortar, napalm, shrapnel, chain reaction), tank (armor, thorns, shield, lifesteal, revive), mage (Fire Ring, Meteor, Frost Nova, Thunderstorm, Arcane Orbs + burn / freeze / shock)
 - 7 evolutions: Saw Storm, Nuke Launcher, Plague Heart, Iron Maiden, Inferno, Armageddon, Absolute Zero
+- Lakes block walking (bullets fly over)
+- **Outposts**: soldiers + a machine-gun nest hold the line and draw the horde. When one falls it becomes an **infested nest** that spawns mobs until you destroy it (XP, heart, chance of a chest). Off-screen outposts show a flag on the screen edge
+- **Survivors**: every minute or two someone gets trapped by the undead (look for the `!`). Clear the mobs around them and walk up to rescue them - up to 2 followers fight beside you
+- The late game ramps hard: compounding mob HP, rising damage and resistance, elites from minute 5, swarms every 2 minutes
 
 ## Skill tree + prestige
 
