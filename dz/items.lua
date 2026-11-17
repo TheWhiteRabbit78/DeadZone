@@ -119,6 +119,20 @@ I.LIST = {
   { id = "zero",     name = "Absolute Zero", rarity = "legendary", max = 1, req = { frost = 3, permafrost = 1 }, mods = { frostcd_x = 0.5, frost = 1 }, lines = { "EVOLUTION", "Frost Nova every 3s", "+1 nova level" } },
 }
 
+-- combo items are only offered once you own something they work with
+local SPELLS_CD = { "meteor", "frost", "thunder", "orbs" }
+local FIRE = { "firering", "meteor", "napalm", "inferno" }
+local BOOMS = { "w4", "exround", "mortar", "meteor", "corpse", "spike" }
+local AREA = { "w4", "exround", "mortar", "corpse", "spike", "aura", "firering", "meteor", "frost", "thunder", "orbs", "napalm", "shrap" }
+local NEEDS = {
+  conductor = { "thunder", "coil" },
+  permafrost = { "frost" },
+  pyro = FIRE,
+  focus = SPELLS_CD,
+  shrap = BOOMS, napalm = BOOMS, chainre = BOOMS,
+  powder = AREA, bigbang = AREA, demo = AREA, archmage = AREA,
+}
+
 I.SNACK = { id = "snack", name = "Snack", rarity = "common", max = 999, mods = {}, lines = { "Heal 50 HP" }, heal = 5, parsed = {} }
 
 local function parseMods(mods, where)
@@ -143,6 +157,11 @@ I.FILLERS = {
 }
 
 I.byId = { snack = I.SNACK }
+for id, list in pairs(NEEDS) do
+  for _, it in ipairs(I.LIST) do
+    if it.id == id then it.needsAny = list end
+  end
+end
 for _, it in ipairs(I.FILLERS) do
   I.byId[it.id] = it
   it.parsed = parseMods(it.mods, "filler " .. it.id)
@@ -199,6 +218,16 @@ function I.compute(owned, extra, order)
   return out
 end
 
+function I.needsText(it)
+  if not it.needsAny then return nil end
+  local names = {}
+  for _, id in ipairs(it.needsAny) do
+    local o = I.byId[id]
+    if o and #names < 4 then names[#names + 1] = o.name end
+  end
+  return "Works with: " .. table.concat(names, ", ") .. ((#it.needsAny > 4) and ", ..." or "")
+end
+
 function I.hasHpMod(it)
   for _, m in ipairs(it.parsed or {}) do if m[1] == "maxhp" then return true end end
   return false
@@ -213,6 +242,11 @@ end
 local function available(it, owned, banned)
   if banned and banned[it.id] then return false end
   if (owned[it.id] or 0) >= it.max then return false end
+  if it.needsAny then
+    local has = false
+    for _, id in ipairs(it.needsAny) do if (owned[id] or 0) > 0 then has = true; break end end
+    if not has then return false end
+  end
   if it.req then
     for rid, need in pairs(it.req) do
       if (owned[rid] or 0) < need then return false end

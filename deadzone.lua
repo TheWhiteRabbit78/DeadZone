@@ -2076,6 +2076,13 @@ local function renderPick()
       if text == "EVOLUTION" then col = S.Y end
       T(cx + 2, y0 + 7 + j, text:sub(1, cardW - 3), col, S.D)
     end
+    local need = I.needsText(it)
+    if need then
+      -- wrap onto two lines if the card is narrow
+      local w = cardW - 4
+      T(cx + 2, y0 + 16, need:sub(1, w), S.A, S.D)
+      if #need > w then T(cx + 2, y0 + 17, need:sub(w + 1, 2 * w), S.A, S.D) end
+    end
   end
   local keysTxt = (n == 4) and "1 2 3 4  pick" or "1 2 3  pick"
   if R.rerolls > 0 then keysTxt = keysTxt .. "      R reroll (" .. R.rerolls .. ")" end
