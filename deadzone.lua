@@ -152,7 +152,7 @@ local function newRun()
     hp = 10, maxHp = 10, cd = 0, iframes = 0,
     xp = 0, level = 1, xpNext = xpFor(1), pending = 0,
     weapon = 1, unlocked = { true, false, false, false },
-    regenT = 0, drainT = 0, sawA = 0, auraT = 0, auraFlash = 0, moving = false,
+    knx = 0, kny = 0, regenT = 0, drainT = 0, sawA = 0, auraT = 0, auraFlash = 0, moving = false,
   }
   owned = {}
   recompute()
@@ -225,8 +225,8 @@ local function hurtPlayer(dmg)
   end
   dmg = dmg * (1 - min(0.6, stats.armor * 0.15))
   p.hp = p.hp - dmg
-  p.iframes = 14
-  shake = max(shake, 3)
+  p.iframes = 18
+  if dmg >= 2 then shake = max(shake, 2) end
   burst(p.x, p.y - 7, 6, S.R, 1.2)
   sfx("hurt")
   if p.hp <= 0 then
@@ -515,7 +515,8 @@ local function updatePlayer()
   p.vy = p.vy + (ty - p.vy) * 0.5
   if abs(tx - p.vx) < 0.06 then p.vx = tx end
   if abs(ty - p.vy) < 0.06 then p.vy = ty end
-  p.x, p.y = world.pushOut(p.x + p.vx, p.y + p.vy, 4)
+  p.x, p.y = world.pushOut(p.x + p.vx + p.knx, p.y + p.vy + p.kny, 4)
+  p.knx, p.kny = p.knx * 0.7, p.kny * 0.7
   p.moving = (ix ~= 0 or iy ~= 0)
 
   local shooting = held[keys.space]
@@ -579,12 +580,12 @@ local function updateMobs()
 
         if d.ranged then
           if dist < 50 then mv = -mv * 0.6 elseif dist < 80 then mv = 0 end
-          if dist < 170 and m.cd <= 0 then
+          if dist < 115 and m.cd <= 0 then
             m.cd = random(50, 80)
             local sx, sy = m.x, m.y - 8
             local tx, ty = p.x - sx, p.y - 7 - sy
             local l = sqrt(tx * tx + ty * ty)
-            eshots[#eshots + 1] = { x = sx, y = sy, vx = tx / l * 2.6, vy = ty / l * 2.6, life = 90, dmg = 1 + dmgAdd(s) }
+            eshots[#eshots + 1] = { x = sx, y = sy, vx = tx / l * 2.6, vy = ty / l * 2.6, life = 48, dmg = 1 + dmgAdd(s) }
           end
         end
 
@@ -608,6 +609,10 @@ local function updateMobs()
           for _ = 1, 3 do spawnMob("zombie", m.x + random(-20, 20), m.y + random(-14, 14)) end
         end
 
+        if m.stun and m.stun > 0 then
+          m.stun = m.stun - 1
+          mv = 0
+        end
         if not m.dead then
           m.x = m.x + nx * mv
           m.y = m.y + ny * mv
@@ -634,10 +639,16 @@ local function updateMobs()
           end)
 
           -- contact damage
-          if not d.bomb and dist < r + 5 then
+          if m.atk and m.atk > 0 then m.atk = m.atk - 1 end
+          if not d.bomb and dist < r + 5 and (m.atk or 0) <= 0 then
+            local hpBefore = p.hp
             hurtPlayer(d.dmg + dmgAdd(s))
-            if d.heavy and dist > 0.01 then
-              p.x, p.y = world.pushOut(p.x - nx * 10, p.y - ny * 10, 4)
+            if p.hp < hpBefore then
+              m.atk = d.heavy and 40 or 20
+              if d.heavy then
+                m.stun = 25                      -- brute winds down after a hit: your window to escape
+                p.knx, p.kny = -nx * 4, -ny * 4  -- smooth shove, you keep control
+              end
             end
           end
         end
@@ -948,6 +959,7 @@ local function renderWorld()
       local tint = nil
       if m.flash > 0 then tint = S.W end
       if m.fuse and m.fuse % 4 < 2 then tint = S.W end
+      if m.def.ranged and m.cd < 10 and frame % 4 < 2 then tint = S.Y end
       addDraw(sp, x, y + bob, m.flip, tint, m.y)
     end
   end
