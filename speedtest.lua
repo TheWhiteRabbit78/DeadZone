@@ -34,16 +34,17 @@ local PW, PH, CW, CH = scr.PW, scr.PH, scr.CW, scr.CH
 local spr = {}
 for name, rows in pairs(SPR) do spr[name] = G.compile(rows) end
 
----------------------------------------------------------------- ground (cell-based, infinite)
+---------------------------------------------------------------- ground
+-- The ground is plain grass cells; tufts and flowers are tiny sprites placed on
+-- an 8x8 px grid. That lets the camera move 1 pixel at a time in any direction.
 local s = P.slot
-local Gc, gc = s.G, s.g
-local PAT = {
-  G.pattern({ Gc, Gc, Gc, Gc, Gc, Gc }),        -- plain
-  G.pattern({ Gc, Gc, gc, Gc, Gc, gc }),        -- tuft
-  G.pattern({ Gc, Gc, Gc, gc, gc, Gc }),        -- tuft
-  G.pattern({ Gc, gc, Gc, Gc, gc, Gc }),        -- tuft
-  G.pattern({ Gc, Gc, Gc, s.Y, Gc, Gc }),       -- yellow flower
-  G.pattern({ Gc, Gc, s.R, Gc, Gc, Gc }),       -- red flower
+local PLAIN = G.pattern({ s.G, s.G, s.G, s.G, s.G, s.G })
+local DECO = {
+  G.compile({ "g.g", ".g." }),
+  G.compile({ "g..", ".g.", ".g." }),
+  G.compile({ ".g", "g.", "g." }),
+  G.compile({ "Y" }),
+  G.compile({ "R" }),
 }
 local seed = random(1, 9999)
 
@@ -52,22 +53,27 @@ local function hash(x, y, k)
   return n - floor(n)
 end
 
-local ground = {}
-local function groundAt(wx, wy)
-  local row = ground[wy]
-  if not row then row = {}; ground[wy] = row end
-  local p = row[wx]
-  if not p then
-    local r = hash(wx, wy, 0)
-    if r < 0.025 then p = PAT[2]
-    elseif r < 0.05 then p = PAT[3]
-    elseif r < 0.07 then p = PAT[4]
-    elseif r < 0.073 then p = PAT[5]
-    elseif r < 0.076 then p = PAT[6]
-    else p = PAT[1] end
-    row[wx] = p
+-- deco grid cache: [gy][gx] = false or {sprite, x, y}
+local decoCache, decoRows = {}, 0
+local function decoAt(gx, gy)
+  local row = decoCache[gy]
+  if not row then
+    row = {}
+    decoCache[gy] = row
+    decoRows = decoRows + 1
+    if decoRows > 4000 then decoCache, decoRows = { [gy] = row }, 1 end
   end
-  return p
+  local d = row[gx]
+  if d == nil then
+    local r = hash(gx, gy, 0)
+    d = false
+    if r < 0.32 then
+      local kind = (r < 0.29) and (1 + floor(r * 100) % 3) or (r < 0.305 and 4 or 5)
+      d = { DECO[kind], gx * 8 + floor(hash(gx, gy, 1) * 6), gy * 8 + floor(hash(gx, gy, 2) * 6) }
+    end
+    row[gx] = d
+  end
+  return d
 end
 
 ---------------------------------------------------------------- props (trees/rocks), one chance per region
@@ -157,16 +163,26 @@ end
 
 ---------------------------------------------------------------- render
 local camX, camY = 0, 0
+local camFX, camFY = -PW / 2, -PH / 2
 local drawList = {}
 
 local function render()
-  -- camera centred on player, snapped to whole cells (2x3 px) so the ground can be pre-encoded
+  -- camera eases toward the player, 1 pixel precision in every direction
   local tx = player.x + 6 - PW / 2
   local ty = player.y + 7 - PH / 2
-  camX, camY = floor(tx / 2) * 2, floor(ty / 3) * 3
-  local ccx, ccy = camX / 2, camY / 3
+  camFX = camFX + (tx - camFX) * 0.45
+  camFY = camFY + (ty - camFY) * 0.45
+  camX, camY = floor(camFX + 0.5), floor(camFY + 0.5)
 
-  scr.fillBase(function(cx, cy) return groundAt(ccx + cx, ccy + cy) end)
+  scr.fillBase(function() return PLAIN end)
+
+  -- grass tufts + flowers
+  for gy = floor(camY / 8) - 1, floor((camY + PH) / 8) do
+    for gx = floor(camX / 8) - 1, floor((camX + PW) / 8) do
+      local d = decoAt(gx, gy)
+      if d then scr.sprite(d[1], d[2] - camX, d[3] - camY) end
+    end
+  end
 
   -- collect things to draw, sorted by their feet (y + height) for depth
   local n = 0
