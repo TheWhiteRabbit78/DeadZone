@@ -76,6 +76,32 @@ for i, letter in ipairs(PRESTIGE_SHIRT) do
 end
 local BLACK = G.pattern({ S.K, S.K, S.K, S.K, S.K, S.K })
 
+-- tiny 3x5 pixel font for floating damage numbers
+local DIGITS = {}
+do
+  local F = {
+    ["0"] = { "WWW", "W.W", "W.W", "W.W", "WWW" }, ["1"] = { ".W.", "WW.", ".W.", ".W.", "WWW" },
+    ["2"] = { "WWW", "..W", "WWW", "W..", "WWW" }, ["3"] = { "WWW", "..W", ".WW", "..W", "WWW" },
+    ["4"] = { "W.W", "W.W", "WWW", "..W", "..W" }, ["5"] = { "WWW", "W..", "WWW", "..W", "WWW" },
+    ["6"] = { "WWW", "W..", "WWW", "W.W", "WWW" }, ["7"] = { "WWW", "..W", ".W.", ".W.", ".W." },
+    ["8"] = { "WWW", "W.W", "WWW", "W.W", "WWW" }, ["9"] = { "WWW", "W.W", "WWW", "..W", "WWW" },
+    ["k"] = { "W..", "W.W", "WW.", "W.W", "W.W" }, ["M"] = { "W.W", "WWW", "WWW", "W.W", "W.W" },
+    ["B"] = { "WW.", "W.W", "WW.", "W.W", "WW." }, ["."] = { ".", ".", ".", ".", "W" },
+  }
+  for ch, rows in pairs(F) do DIGITS[ch] = G.compile(rows) end
+end
+
+-- 1234 -> "1234", 12345 -> "12.3k", 1234567 -> "1.2M"
+local function fmtNum(v)
+  v = max(0, v)
+  if v < 1000 then return tostring(floor(v + 0.5))
+  elseif v < 1e5 then return ("%.1fk"):format(v / 1e3)
+  elseif v < 1e6 then return floor(v / 1e3) .. "k"
+  elseif v < 1e8 then return ("%.1fM"):format(v / 1e6)
+  elseif v < 1e9 then return floor(v / 1e6) .. "M"
+  else return ("%.1fB"):format(v / 1e9) end
+end
+
 ---------------------------------------------------------------------- definitions
 local WEAPONS = {
   { name = "Pistol",   dmg = 6,   cd = 6,  proj = 1, fan = 0.25, jitter = 0.05, speed = 6, range = 150, col = S.Y },
@@ -133,7 +159,7 @@ local prof = Prof.load("Guest")
 local world
 local p, R, stats, owned
 local mobs, bullets, eshots, gems, pickups, parts, beams, strikes, fires, orbs
-local UI = { msg = "", msgCol = S.Y, msgTimer = 0, shake = 0, treeSel = "root", prestigeArm = 0, nameBuf = "", board = {} }
+local UI = { showNums = true, msg = "", msgCol = S.Y, msgTimer = 0, shake = 0, treeSel = "root", prestigeArm = 0, nameBuf = "", board = {} }
 local grid = {}
 
 local function secs() return R.tick / TPS end
@@ -158,8 +184,8 @@ local function removeAt(list, i)
 end
 
 local function recompute()
-  stats = I.compute(owned, Tree.mods(prof.tree, prof.prestige))
-  local newMax = max(1, floor(stats.maxhp + 0.5))
+  stats = I.compute(owned, Tree.mods(prof.tree, prof.prestige), p.hpOrder)
+  local newMax = max(0.5, stats.maxhp)
   p.maxHp = newMax
   if p.hp > newMax then p.hp = newMax end
 end
@@ -179,6 +205,7 @@ local function giveItem(id)
   if not it then return end
   owned[id] = (owned[id] or 0) + 1
   if it.weapon then p.unlocked[it.weapon] = true end
+  if I.hasHpMod(it) then p.hpOrder[#p.hpOrder + 1] = id end
 end
 
 local function newRun()
@@ -189,7 +216,7 @@ local function newRun()
     xp = 0, level = 1, xpNext = xpFor(1), pending = 0, bonus = 0,
     weapon = 1, unlocked = { true, false, false, false },
     regenT = 0, drainT = 0, sawA = 0, auraT = 0, auraFlash = 0, moving = false,
-    shieldT = 0, retalT = 0, revUsed = 0, thornT = 0,
+    shieldT = 0, retalT = 0, revUsed = 0, thornT = 0, hpOrder = {},
   }
   R = {
     tick = 0, kills = 0, score = 0, bossKills = 0,
@@ -200,6 +227,7 @@ local function newRun()
     spell = { meteor = 0, frost = 0, thunder = 0, orbs = 0, mortar = 0, ring = 0, fire = 0 },
     outposts = {}, activeOutposts = {}, followers = {}, survivor = nil, nextSurvivor = 50 * TPS,
     rescued = 0, nestsCleared = 0,
+    dmgSrc = {}, dmgTick = 0, dmgHist = {}, dmgSum = 0, dps = 0, nums = {},
   }
   owned = {}
   mobs, bullets, eshots, gems, pickups, parts, beams, strikes, fires, orbs = {}, {}, {}, {}, {}, {}, {}, {}, {}, {}
@@ -320,13 +348,13 @@ local C = {}   -- combat functions (kept in a table to stay under Lua's local li
 -- multiplier applied to everything the player deals
 function C.runMult()
   local m = stats.dmg
-  if stats.bloodpact > 0 then m = m * (1 + stats.bloodpact * (p.maxHp - p.hp)) end
+  if stats.bloodpact > 0 then m = m * (1 + stats.bloodpact * max(0, p.maxHp - p.hp)) end
   if p.retalT > 0 then m = m * (1 + stats.retal) end
   if stats.bulwark > 0 then m = m * (1 + stats.bulwark * p.maxHp) end
   return m
 end
 
-function C.damageMob(m, dmg, kx, ky, raw)
+function C.damageMob(m, dmg, kx, ky, raw, src)
   if m.dead then return end
   if not raw then
     dmg = dmg * R.mult * (1 - R.res)
@@ -334,6 +362,14 @@ function C.damageMob(m, dmg, kx, ky, raw)
     if (m.burnT or 0) > 0 and stats.pyro > 0 then dmg = dmg * (1 + stats.pyro) end
     if ((m.frozenT or 0) > 0 or (m.chillT or 0) > 0) and stats.permafrost > 0 then dmg = dmg * (1 + stats.permafrost) end
     if stats.lifesteal > 0 then p.hp = min(p.maxHp, p.hp + dmg * stats.lifesteal) end
+  end
+  if src or not raw then
+    -- damage stats: per source, DPS, floating numbers (overkill not counted)
+    local applied = min(dmg, max(0, m.hp))
+    src = src or "other"
+    R.dmgSrc[src] = (R.dmgSrc[src] or 0) + applied
+    R.dmgTick = R.dmgTick + applied
+    m.numAcc = (m.numAcc or 0) + dmg
   end
   m.hp = m.hp - dmg
   m.flash = 2
@@ -365,7 +401,7 @@ function C.explode(x, y, rad, dmg, o)
       local dx, dy = m.x - x, (m.y - 6) - y
       local rr = r2pad + m.def.r
       if dx * dx + dy * dy <= rr * rr then
-        if dmg > 0 then C.damageMob(m, dmg, nil, nil, not o.player) end
+        if dmg > 0 then C.damageMob(m, dmg, nil, nil, not o.player, o.player and (o.src or "explosions") or nil) end
         if o.fire and not m.dead then C.burn(m, dmg * 0.15) end
       end
     end
@@ -394,7 +430,7 @@ function C.explode(x, y, rad, dmg, o)
     for i = 1, n2 do
       local a = i / n2 * 2 * pi + random() * 0.4
       bullets[#bullets + 1] = { x = x, y = y, vx = cos(a) * 5, vy = sin(a) * 5, life = 9, dmg = dmg * 0.3,
-        pierce = 0, ric = 0, hit = {}, col = S.O, frag = true }
+        pierce = 0, ric = 0, hit = {}, col = S.O, frag = true, src = "shrapnel" }
     end
     -- chain reaction
     local depth = o.depth or 0
@@ -411,7 +447,7 @@ end
 function C.thornBlast(mult)
   local power = stats.thorns * (8 + 12 * stats.armor) * mult
   if power <= 0 then return end
-  C.explode(p.x, p.y - 6, 30, power, { player = true, small = true })
+  C.explode(p.x, p.y - 6, 30, power, { player = true, small = true, src = "thorns" })
   ring(p.x, p.y - 6, 30, 18, S.A, 2.5)
 end
 
@@ -468,6 +504,10 @@ end
 function C.killMob(m)
   if m.dead then return end
   m.dead = true
+  if m.numAcc and m.numAcc > 0 and UI.showNums and #R.nums < 60 then
+    R.nums[#R.nums + 1] = { x = m.x, y = m.y - (m.def.r * 2 + 10), v = m.numAcc, crit = m.numCrit, life = 16 }
+    m.numAcc = 0
+  end
   R.kills = R.kills + 1
   R.score = R.score + m.def.score * (m.elite and 3 or 1)
   C.dropGem(m.x, m.y - 4, m.def.xp * (1 + secs() / 400) * (m.elite and 4 or 1))
@@ -579,37 +619,46 @@ function C.fire()
   end
   if bestA then baseA = bestA end
 
+  -- fire rate beyond 1 volley per tick and shots that don't fit under the
+  -- bullet cap are not lost: they turn into extra damage on what does fire
+  local desired = w.cd / stats.rate
+  local over = 1
+  if desired < 1 then over = 1 / desired; desired = 1 end
+  local shots = max(1, min(proj, 240 - #bullets))
+  over = over * proj / shots
   local fan = w.fan * (1 + (proj - w.proj) * 0.2)
-  local dmg = w.dmg * stats.gundmg
-  for i = 1, proj do
+  local dmg = w.dmg * stats.gundmg * over
+  for i = 1, shots do
     local a = baseA + (random() - 0.5) * w.jitter
-    if proj > 1 then a = a - fan / 2 + fan * (i - 1) / (proj - 1) end
+    if shots > 1 then a = a - fan / 2 + fan * (i - 1) / (shots - 1) end
     local ca, sa = cos(a), sin(a)
     bullets[#bullets + 1] = {
       x = ox + ca * 6, y = oy + sa * 6, vx = ca * w.speed, vy = sa * w.speed,
       life = floor(range / w.speed), dmg = dmg, pierce = floor(stats.pierce + 0.5),
-      ric = floor(stats.ricochet + 0.5), hit = {}, col = w.col, aoe = w.aoe, aoeBase = w.dmg,
+      ric = floor(stats.ricochet + 0.5), hit = {}, col = w.col, aoe = w.aoe, aoeBase = w.dmg * over,
     }
   end
   addPart(ox + p.fx * 8, oy + p.fy * 8, 0, 0, 2, S.Y)
-  p.cd = max(1, floor(w.cd / stats.rate + 0.5))
+  p.cd = p.cd + desired
   sfx("shoot")
 end
 
 function C.bulletHit(b, m)
   b.hit[m] = true
   local dmg = b.dmg
-  if random() < stats.crit then
+  local crit = random() < stats.crit
+  if crit then
     dmg = dmg * stats.critdmg
     addPart(m.x, m.y - 14, 0, -0.6, 6, S.Y)
   end
-  C.damageMob(m, dmg, b.vx, b.vy)
+  if crit then m.numCrit = true end
+  C.damageMob(m, dmg, b.vx, b.vy, false, b.src or "gun")
   sfx("hit")
   if b.frag then return end
 
   -- explosive rounds
   if stats.exround > 0 and not b.aoe then
-    C.explode(b.x, b.y, 10, b.dmg / stats.gundmg * 0.35 * stats.exround, { player = true, small = true })
+    C.explode(b.x, b.y, 10, b.dmg / stats.gundmg * 0.35 * stats.exround, { player = true, small = true, src = "exp. rounds" })
   end
 
   -- storm coil: chain lightning
@@ -621,14 +670,14 @@ function C.bulletHit(b, m)
       zapped[t] = true
       beams[#beams + 1] = { from.x, from.y - 6, t.x, t.y - 6, 3 }
       if stats.conductor > 0 then t.shockT = 40 end
-      C.damageMob(t, dmg * 0.6)
+      C.damageMob(t, dmg * 0.6, nil, nil, false, "lightning")
       from = t
     end
     sfx("zap")
   end
 
   -- splitter
-  if stats.split >= 1 and not b.isSplit then
+  if stats.split >= 1 and not b.isSplit and #bullets < 240 then
     local a = atan2(b.vy, b.vx)
     local spd = sqrt(b.vx * b.vx + b.vy * b.vy)
     for k = 1, floor(stats.split + 0.5) * 2 do
@@ -656,13 +705,13 @@ function C.updateBullets()
         end
       end)
       if target and b.ally then
-        C.damageMob(target, b.dmg * (1 - R.res), b.vx, b.vy, true)
+        C.damageMob(target, b.dmg * (1 - R.res), b.vx, b.vy, true, "allies")
         dead = true
         break
       end
       if target then
         C.bulletHit(b, target)
-        if b.aoe then C.explode(b.x, b.y, b.aoe, b.aoeBase, { player = true }); dead = true; break end
+        if b.aoe then C.explode(b.x, b.y, b.aoe, b.aoeBase, { player = true, src = "launcher" }); dead = true; break end
         if b.ric > 0 then
           b.ric = b.ric - 1
           local t = nearestMob(b.x, b.y, 90, b.hit)
@@ -682,7 +731,7 @@ function C.updateBullets()
     b.life = b.life - 1
     if b.life <= 0 and not dead then
       dead = true
-      if b.aoe then C.explode(b.x, b.y, b.aoe, b.aoeBase, { player = true }) end
+      if b.aoe then C.explode(b.x, b.y, b.aoe, b.aoeBase, { player = true, src = "launcher" }) end
     end
     if b.aoe and not dead and frame % 2 == 0 then addPart(b.x, b.y, 0, 0, 4, S.D) end
     if dead then removeAt(bullets, i) end
@@ -724,8 +773,8 @@ function C.updatePlayer()
   end
   if p.fx < -0.1 then p.flip = true elseif p.fx > 0.1 then p.flip = false end
 
-  if p.cd > 0 then p.cd = p.cd - 1 end
-  if shooting and p.cd <= 0 and #bullets < 220 then C.fire() end
+  p.cd = max(-1, p.cd - 1)
+  if shooting and p.cd <= 0 then C.fire() end
   if p.iframes > 0 then p.iframes = p.iframes - 1 end
   if p.retalT > 0 then p.retalT = p.retalT - 1 end
   if stats.shield >= 1 and p.shieldT < C.shieldCd() then p.shieldT = p.shieldT + 1 end
@@ -800,7 +849,7 @@ function C.updateMobs()
         if m.burnT and m.burnT > 0 then
           m.burnT = m.burnT - 1
           if m.burnT % 10 == 0 then
-            C.damageMob(m, m.burnP)
+            C.damageMob(m, m.burnP, nil, nil, false, "burn")
             addPart(m.x + random(-3, 3), m.y - 10, 0, -0.5, 5, (random() < 0.5) and S.O or S.R)
           end
           if m.burnT <= 0 then m.burnP = 0 end
@@ -933,7 +982,7 @@ function C.updatePassives()
         local r = m.def.r + 3
         if dx * dx + dy * dy <= r * r and (m.sawCd or 0) <= frame then
           m.sawCd = frame + 8
-          C.damageMob(m, 5 * stats.sawdmg, cos(s[3]), sin(s[3]))
+          C.damageMob(m, 5 * stats.sawdmg, cos(s[3]), sin(s[3]), false, "saws")
         end
       end)
     end
@@ -950,7 +999,7 @@ function C.updatePassives()
       for _, m in ipairs(mobs) do
         if not m.dead then
           local dx, dy = m.x - p.x, m.y - p.y
-          if dx * dx + dy * dy <= (rad + m.def.r) ^ 2 then C.damageMob(m, dmg) end
+          if dx * dx + dy * dy <= (rad + m.def.r) ^ 2 then C.damageMob(m, dmg, nil, nil, false, "aura") end
         end
       end
     end
@@ -967,7 +1016,7 @@ function C.updatePassives()
         if not m.dead then
           local dx, dy = m.x - p.x, (m.y - 6) - (p.y - 6)
           if dx * dx + dy * dy <= (rad + m.def.r) ^ 2 then
-            C.damageMob(m, dmg)
+            C.damageMob(m, dmg, nil, nil, false, "fire ring")
             if not m.dead then C.burn(m, 0.5 * stats.firering * aoe) end
           end
         end
@@ -1004,7 +1053,7 @@ function C.updatePassives()
           if dx * dx + dy * dy <= (rad + m.def.r) ^ 2 then
             m.frozenT = m.def.boss and 15 or 40
             m.chillT = 100
-            C.damageMob(m, dmg)
+            C.damageMob(m, dmg, nil, nil, false, "frost nova")
           end
         end
       end
@@ -1023,7 +1072,7 @@ function C.updatePassives()
       if t then
         beams[#beams + 1] = { t.x + random(-20, 20), t.y - 120, t.x, t.y - 6, 3, bolt = true }
         t.shockT = 40
-        C.damageMob(t, 12 * aoe)
+        C.damageMob(t, 12 * aoe, nil, nil, false, "thunder")
         burst(t.x, t.y - 6, 5, S.Y, 1.2)
         sfx("zap")
       end
@@ -1073,7 +1122,8 @@ function C.updateSpellObjects()
     s.t = s.t - 1
     if s.t <= 0 then
       removeAt(strikes, i)
-      C.explode(s.x, s.y, s.rad, s.dmg, { player = true, depth = s.depth, fire = s.fire })
+      C.explode(s.x, s.y, s.rad, s.dmg, { player = true, depth = s.depth, fire = s.fire,
+        src = (s.kind == "chain") and "chain reaction" or s.kind })
     end
   end
   -- burning ground
@@ -1085,7 +1135,7 @@ function C.updateSpellObjects()
         if not m.dead then
           local dx, dy = m.x - f.x, (m.y - 6) - f.y
           if dx * dx + dy * dy <= f.r * f.r then
-            C.damageMob(m, f.dmg * stats.aoedmg)
+            C.damageMob(m, f.dmg * stats.aoedmg, nil, nil, false, "napalm")
             if not m.dead then C.burn(m, 0.4 * stats.aoedmg) end
           end
         end
@@ -1105,7 +1155,7 @@ function C.updateSpellObjects()
         o.vy = o.vy * 0.82 + dy / d * 0.9
       end
       if d < o.target.def.r + 2 then
-        C.damageMob(o.target, o.dmg)
+        C.damageMob(o.target, o.dmg, nil, nil, false, "orbs")
         burst(o.x, o.y, 3, S.C, 0.8)
         o.life = 0
       end
@@ -1144,7 +1194,7 @@ function C.updatePickups()
       removeAt(pickups, i)
       if it.kind == "heart" then
         p.hp = min(p.maxHp, p.hp + 3)
-        say("+3 HP", 25, S.R)
+        say("+30 HP", 25, S.R)
         sfx("pick")
       elseif it.kind == "magnet" then
         for _, g in ipairs(gems) do g.pull = true end
@@ -1510,8 +1560,32 @@ function C.updateFollowers(s)
   end
 end
 
+-- rolling 3-second DPS and floating damage numbers (summed per mob every half second)
+function C.updateDamageStats()
+  local slot = R.tick % 60 + 1
+  R.dmgSum = R.dmgSum - (R.dmgHist[slot] or 0) + R.dmgTick
+  R.dmgHist[slot] = R.dmgTick
+  R.dmgTick = 0
+  R.dps = R.dmgSum / 3
+  for _, m in ipairs(mobs) do
+    if m.numAcc and m.numAcc > 0 and (m.dead or (R.tick + m.phase) % 10 == 0) then
+      if UI.showNums and #R.nums < 60 then
+        R.nums[#R.nums + 1] = { x = m.x, y = m.y - (m.def.r * 2 + 10), v = m.numAcc, crit = m.numCrit, life = 16 }
+      end
+      m.numAcc, m.numCrit = 0, nil
+    end
+  end
+  for i = #R.nums, 1, -1 do
+    local n = R.nums[i]
+    n.life = n.life - 1
+    n.y = n.y - 0.4
+    if n.life <= 0 then removeAt(R.nums, i) end
+  end
+end
+
 local function update()
   R.tick = R.tick + 1
+  C.updateDamageStats()
   R.mult = C.runMult()
   R.res = mobRes(secs())
   if #R.boomQ > 0 then
@@ -1519,7 +1593,7 @@ local function update()
     R.boomQ = {}
     for i = 1, #q do
       local b = q[i]
-      if i <= 25 then C.explode(b[1], b[2], b[3], b[4], { player = b[5] })
+      if i <= 25 then C.explode(b[1], b[2], b[3], b[4], { player = b[5], src = b[5] and "corpse bomb" or nil })
       elseif #R.boomQ < 60 then R.boomQ[#R.boomQ + 1] = b end
     end
   end
@@ -1833,6 +1907,34 @@ local function renderWorld()
     end
   end
   for _, q in ipairs(parts) do scr.pixel(q.x - camX, q.y - camY, q.col) end
+
+  -- HP bars on elites and nests
+  for _, m in ipairs(mobs) do
+    if (m.elite or m.def.static) and not m.dead and m.hp < m.maxHp then
+      local sp = spr[m.def.spr]
+      local bx, by = floor(m.x - 6 - camX), floor(m.y - sp.h - 2 - camY)
+      if bx > -12 and bx < PW and by > 0 and by < PH then
+        scr.rect(bx, by, 12, 1, S.K)
+        local fill = floor(max(0, m.hp) / m.maxHp * 12)
+        if fill > 0 then scr.rect(bx, by, fill, 1, m.def.static and S.Z or S.O) end
+      end
+    end
+  end
+
+  -- floating damage numbers
+  if UI.showNums then
+    for _, n in ipairs(R.nums) do
+      local txt = fmtNum(n.v)
+      local x = floor(n.x - #txt * 2 - camX)
+      local y = floor(n.y - camY)
+      local col = n.crit and S.Y or S.W
+      for i = 1, #txt do
+        local g = DIGITS[txt:sub(i, i)]
+        if g then scr.sprite(g, x, y, false, col) end
+        x = x + ((txt:sub(i, i) == ".") and 2 or 4)
+      end
+    end
+  end
 end
 
 ---------------------------------------------------------------------- render: HUD
@@ -1843,10 +1945,11 @@ local function renderHUD()
   local bgs = {}
   for i = 1, 20 do bgs[i] = HEX[i <= filled and S.R or S.D] end
   T(5, 1, (" "):rep(20), ("0"):rep(20), table.concat(bgs))
-  local info = ("%d/%d   LV %d   %s   Kills %d   Score %d"):format(ceil(p.hp), p.maxHp, p.level, fmtTime(secs()), R.kills, R.score)
+  local info = ("%d/%d   LV %d   %s   Kills %d   Score %d"):format(ceil(p.hp * 10 - 0.01), floor(p.maxHp * 10 + 0.5), p.level, fmtTime(secs()), R.kills, R.score)
   T(27, 1, info, S.W)
-  local threat = ("Undead HP x%.1f  res %d%%"):format(hpMul(secs()), floor(R.res * 100 + 0.5))
-  T(CW - 60, 1, threat, S.O)
+  T(82, 1, "DPS " .. fmtNum(R.dps), S.Y)
+  local threat = ("Zombie HP %s (x%.1f)  res %d%%"):format(fmtNum(MOBS.zombie.hp * hpMul(secs())), hpMul(secs()), floor(R.res * 100 + 0.5))
+  T(CW - 18 - #threat, 1, threat, S.O)
   local who = prof.name .. (prof.prestige > 0 and (" P" .. prof.prestige) or "")
   T(CW - #who, 1, who, S.Y)
 
@@ -1888,7 +1991,7 @@ local function renderHUD()
   if stats.revive >= 1 then extra = extra .. ("Revives %d   "):format(floor(stats.revive + 0.5) - p.revUsed) end
   if #R.followers > 0 then extra = extra .. ("Followers %d/2   "):format(#R.followers) end
   T(x + 2, CH, extra, S.C)
-  T(CW - 18, CH, "P pause / build", S.A)
+  T(CW - 30, CH, "H numbers   P pause / build", S.A)
 end
 
 ---------------------------------------------------------------------- render: overlays
@@ -1902,7 +2005,7 @@ local function statLines()
     ("Projectiles  +%d   Pierce %d"):format(floor(st.proj + 0.5), floor(st.pierce + 0.5)),
     ("Crit         %d%%  x%.2f"):format(floor(st.crit * 100 + 0.5), st.critdmg),
     ("Area size    x%.2f"):format(st.area),
-    ("Max HP       %d"):format(p.maxHp),
+    ("Max HP       %d"):format(floor(p.maxHp * 10 + 0.5)),
     ("Armor        %.1f  (-%d%% dmg)"):format(st.armor, floor(I.armorReduction(st.armor) * 100 + 0.5)),
     ("Dodge        %d%%"):format(floor(st.dodge * 100 + 0.5)),
     ("Lifesteal    %.1f%%"):format(st.lifesteal * 100),
@@ -1911,6 +2014,19 @@ local function statLines()
     ("Luck         %.1f"):format(st.luck),
     ("Mob spawns   x%.2f"):format(st.spawn),
   }
+end
+
+local function sourceLines(n)
+  local list, total = {}, 0
+  for src, v in pairs(R.dmgSrc) do list[#list + 1] = { src, v }; total = total + v end
+  table.sort(list, function(a, b) return a[2] > b[2] end)
+  local L = {}
+  local t = max(1, secs())
+  for i = 1, min(n, #list) do
+    local e = list[i]
+    L[i] = ("%-15s %7s %4d%% %7s/s"):format(e[1], fmtNum(e[2]), floor(e[2] / max(1, total) * 100 + 0.5), fmtNum(e[2] / t))
+  end
+  return L, total
 end
 
 local function ownedList()
@@ -1959,7 +2075,7 @@ local function renderPick()
 end
 
 local function renderPause()
-  local w, h = 84, 28
+  local w, h = min(CW - 4, 130), 28
   local x0, y0 = floor((CW - w) / 2) + 1, floor((CH - h) / 2) + 1
   frameBox(x0, y0, w, h, S.D)
   center(y0 + 1, "PAUSED", S.Y)
@@ -1971,11 +2087,17 @@ local function renderPause()
   for i, e in ipairs(items) do
     if i <= 20 then T(x0 + 46, y0 + 4 + i, e[1], e[2]) end
   end
+  if w >= 120 then
+    local lines, total = sourceLines(18)
+    T(x0 + 78, y0 + 3, "DAMAGE BY SOURCE", S.A)
+    T(x0 + 78, y0 + 4, ("total %s   now %s/s"):format(fmtNum(total), fmtNum(R.dps)), S.Y)
+    for i, l in ipairs(lines) do T(x0 + 78, y0 + 5 + i, l, S.W) end
+  end
   center(y0 + 26, "P / SPACE resume      Q end run", S.W)
 end
 
 local function renderDead()
-  local w, h = 64, 22
+  local w, h = 72, 30
   local x0, y0 = floor((CW - w) / 2) + 1, floor((CH - h) / 2) + 1
   frameBox(x0, y0, w, h, S.R)
   center(y0 + 2, "Y O U   D I E D", S.R)
@@ -1993,7 +2115,10 @@ local function renderDead()
   local names = {}
   for i, e in ipairs(items) do if i <= 6 then names[#names + 1] = e[1] end end
   if #names > 0 then center(y0 + 14, table.concat(names, ", "):sub(1, w - 4), S.A) end
-  if R.deadTimer > 30 then center(y0 + 18, "SPACE new run     T skill tree     Q title", S.g) end
+  local lines, total = sourceLines(7)
+  center(y0 + 16, "DAMAGE BY SOURCE   (total " .. fmtNum(total) .. ")", S.A)
+  for i, l in ipairs(lines) do center(y0 + 17 + i, l, S.W) end
+  if R.deadTimer > 30 then center(y0 + 27, "SPACE new run     T skill tree     Q title", S.g) end
 end
 
 local function renderTitle()
@@ -2208,7 +2333,10 @@ local function onKey(k)
     elseif k == keys.backspace then UI.nameBuf = UI.nameBuf:sub(1, -2)
     elseif k == keys.tab then state = "title" end
   elseif state == "play" then
-    if k == keys.p then state = "paused"
+    if k == keys.h then
+      UI.showNums = not UI.showNums
+      say(UI.showNums and "Damage numbers ON" or "Damage numbers OFF", 25, S.W)
+    elseif k == keys.p then state = "paused"
     elseif NUM[k] then
       local n = NUM[k]
       if p.unlocked[n] then p.weapon = n; say(WEAPONS[n].name, 25, S.W)

@@ -26,7 +26,7 @@ local function node(id, name, branch, x, y, max, parent, mods, desc, opt)
   N[#N + 1] = n
 end
 
-node("root", "Awakening", "root", 0, 0, 1, nil, { maxhp = 1 }, "+1 max HP. The journey starts here", { key = true })
+node("root", "Awakening", "root", 0, 0, 1, nil, { maxhp = 1 }, "+10 max HP. The journey starts here", { key = true })
 
 -- Firepower -----------------------------------------------------------------
 node("f_might",   "Might",          "fire", 0, -1, 10, "root",    { gundmg_pct = 0.02 }, "+2% gun damage")
@@ -63,9 +63,9 @@ node("a_thunder", "Thunderhead",    "arcana", -5, 1, 5,  "a_wild",  { chain = 0.
 node("a_apex",    "ARCHMAGE",       "arcana", -6, 0, 3,  "a_wild",  { aoedmg_x = 1.15 },  "APEX: x1.15 area damage")
 
 -- Fortitude -------------------------------------------------------------------
-node("t_vital",   "Vitality",       "fort", 1, 0, 10, "root",    { maxhp = 2 },       "+2 max HP")
+node("t_vital",   "Vitality",       "fort", 1, 0, 10, "root",    { maxhp = 2 },       "+20 max HP")
 node("t_tough",   "Toughness",      "fort", 2, 0, 10, "t_vital", { armor = 0.3 },     "+0.3 armor")
-node("t_recov",   "Recovery",       "fort", 2, -1, 6, "t_tough", { regen = 0.3 },     "+0.3 HP regen")
+node("t_recov",   "Recovery",       "fort", 2, -1, 6, "t_tough", { regen = 0.3 },     "+3 HP every 10s")
 node("t_evade",   "Evasion",        "fort", 2, 1, 10, "t_tough", { dodge = 0.01 },    "+1% dodge")
 node("t_hide",    "Thick Hide",     "fort", 3, 0, 10, "t_tough", { maxhp_pct = 0.03 }, "+3% max HP")
 node("t_leech",   "Leech",          "fort", 3, -1, 5, "t_hide",  { lifesteal = 0.002 }, "Heal 0.2% of damage dealt")
@@ -75,7 +75,7 @@ node("t_shield",  "Shield Training","fort", 4, -1, 1, "t_guard", {}, "KEYSTONE: 
 node("t_retal",   "Retaliator",     "fort", 5, -1, 5, "t_shield", { retal = 0.1 },    "+10% Retaliation power")
 node("t_plating", "Bulwark Plating","fort", 4, 1, 5,  "t_guard", { armor = 0.5 },     "+0.5 armor")
 node("t_life",    "Second Life",    "fort", 5, 0, 1,  "t_guard", { revive = 1 },      "KEYSTONE: revive once per run", { key = true })
-node("t_iron",    "Iron Body",      "fort", 5, 1, 5,  "t_life",  { maxhp = 3 },       "+3 max HP")
+node("t_iron",    "Iron Body",      "fort", 5, 1, 5,  "t_life",  { maxhp = 3 },       "+30 max HP")
 node("t_apex",    "COLOSSUS",       "fort", 6, 0, 3,  "t_life",  { maxhp_x = 1.15 },  "APEX: x1.15 max HP")
 
 -- Fortune -----------------------------------------------------------------------

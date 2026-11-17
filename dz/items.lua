@@ -43,10 +43,10 @@ I.LIST = {
   { id = "sharp",   name = "Sharpened Rounds", rarity = "common", max = 5, mods = { gundmg_pct = 0.12 }, lines = { "+12% gun damage" } },
   { id = "oil",     name = "Oiled Trigger",    rarity = "common", max = 5, mods = { rate_pct = 0.10 },   lines = { "+10% fire rate" } },
   { id = "boots",   name = "Running Boots",    rarity = "common", max = 4, mods = { speed_pct = 0.10 },  lines = { "+10% move speed" } },
-  { id = "skin",    name = "Thick Skin",       rarity = "common", max = 5, mods = { maxhp = 3 },         lines = { "+3 max HP" }, heal = 3 },
+  { id = "skin",    name = "Thick Skin",       rarity = "common", max = 5, mods = { maxhp = 3 },         lines = { "+30 max HP" }, heal = 3 },
   { id = "charm",   name = "Magnet Charm",     rarity = "common", max = 3, mods = { magnet_pct = 0.4 },  lines = { "+40% pickup range" } },
   { id = "scope",   name = "Scope",            rarity = "common", max = 3, mods = { range_pct = 0.2 },   lines = { "+20% range" } },
-  { id = "bandage", name = "Bandages",         rarity = "common", max = 3, mods = { regen = 1 },         lines = { "+1 HP every 10s" } },
+  { id = "bandage", name = "Bandages",         rarity = "common", max = 3, mods = { regen = 1 },         lines = { "+10 HP every 10s" } },
   { id = "coin",    name = "Lucky Coin",       rarity = "common", max = 4, mods = { crit = 0.05, luck = 0.5 }, lines = { "+5% crit chance", "+luck (rarer items)" } },
   { id = "notes",   name = "Study Notes",      rarity = "common", max = 3, mods = { xp_pct = 0.15 },     lines = { "+15% XP" } },
   { id = "powder",  name = "Black Powder",     rarity = "common", max = 5, mods = { aoedmg_pct = 0.12 }, lines = { "+12% area damage" } },
@@ -81,10 +81,10 @@ I.LIST = {
   { id = "orbs",    name = "Arcane Orbs",   rarity = "rare", max = 4, mods = { orbs = 1 },               lines = { "+1 homing orb every second" } },
 
   ---------------------------------------------------------------- epic (big power, real cost)
-  { id = "glass",     name = "Glass Cannon", rarity = "epic", max = 2, mods = { dmg_x = 2, maxhp_x = 0.5 }, lines = { "x2 all damage", "!Halves base max HP", "(flat +HP bonuses still count fully)" } },
-  { id = "blood",     name = "Blood Pact",   rarity = "epic", max = 2, mods = { bloodpact = 0.05 },  lines = { "+5% damage per missing HP" } },
+  { id = "glass",     name = "Glass Cannon", rarity = "epic", max = 2, mods = { dmg_x = 2, maxhp_x = 0.5 }, lines = { "x2 all damage", "!Halves your max HP now", "(HP you gain later counts fully)" } },
+  { id = "blood",     name = "Blood Pact",   rarity = "epic", max = 2, mods = { bloodpact = 0.05 },  lines = { "+5% damage per 10 missing HP" } },
   { id = "greed",     name = "Greed",        rarity = "epic", max = 2, mods = { xp_pct = 0.6, spawn_pct = 0.3 }, lines = { "+60% XP", "!+30% more mobs" } },
-  { id = "overclock", name = "Overclock",    rarity = "epic", max = 2, mods = { rate_x = 1.5, drain = 1 }, lines = { "x1.5 fire rate", "!Lose 1 HP every 20s" } },
+  { id = "overclock", name = "Overclock",    rarity = "epic", max = 2, mods = { rate_x = 1.5, drain = 1 }, lines = { "x1.5 fire rate", "!Lose 10 HP every 20s" } },
   { id = "coil",      name = "Storm Coil",   rarity = "epic", max = 3, mods = { chain = 0.15 },      lines = { "15% on hit: zap 3 nearby mobs" } },
   { id = "split",     name = "Splitter",     rarity = "epic", max = 2, mods = { split = 1 },         lines = { "Bullets split in 2 on hit" } },
   { id = "rico",      name = "Ricochet",     rarity = "epic", max = 3, mods = { ricochet = 1 },      lines = { "Bullets bounce to another mob" } },
@@ -93,7 +93,7 @@ I.LIST = {
   { id = "marks",     name = "Marksman",     rarity = "epic", max = 2, mods = { gundmg_x = 1.8, aoedmg_x = 0.5 }, lines = { "x1.8 gun damage", "!x0.5 area damage" } },
   { id = "shrap",     name = "Shrapnel",     rarity = "epic", max = 2, mods = { shrapnel = 5 },      lines = { "Explosions throw 5 fragments" } },
   { id = "napalm",    name = "Napalm",       rarity = "epic", max = 2, mods = { napalm = 1 },        lines = { "Explosions leave burning ground" } },
-  { id = "jugg",      name = "Juggernaut",   rarity = "epic", max = 2, mods = { maxhp_x = 2, speed_pct = -0.2 }, lines = { "x2 base max HP", "!-20% move speed" } },
+  { id = "jugg",      name = "Juggernaut",   rarity = "epic", max = 2, mods = { maxhp_x = 2, speed_pct = -0.2 }, lines = { "Doubles your max HP now", "!-20% move speed" } },
   { id = "retal",     name = "Retaliation",  rarity = "epic", max = 2, mods = { retal = 1 },         lines = { "x2 damage for 3s after a hit" } },
   { id = "pyro",      name = "Pyromaniac",   rarity = "epic", max = 2, mods = { pyro = 0.3, burn_x = 1.5 }, lines = { "Burning mobs take +30% damage", "x1.5 burn damage" } },
   { id = "permafrost", name = "Permafrost",  rarity = "epic", max = 1, mods = { permafrost = 0.4 },  lines = { "Frozen / chilled mobs take", "+40% damage" } },
@@ -105,21 +105,21 @@ I.LIST = {
   { id = "exec",   name = "Executioner",    rarity = "legendary", max = 1, mods = { crit = 0.12, critdmg = 1.5 }, lines = { "+12% crit chance", "+150% crit damage" } },
   { id = "midas",  name = "Midas Crown",    rarity = "legendary", max = 1, mods = { luck = 3, xp_pct = 0.3, spawn_pct = 0.2 }, lines = { "Much rarer items", "+30% XP", "!+20% more mobs" } },
   { id = "chainre", name = "Chain Reaction", rarity = "legendary", max = 1, mods = { chainreact = 0.3 }, lines = { "30%: explosions set off", "another one nearby" } },
-  { id = "bulwark", name = "Bulwark",       rarity = "legendary", max = 1, mods = { bulwark = 0.01 },  lines = { "+1% damage per max HP" } },
+  { id = "bulwark", name = "Bulwark",       rarity = "legendary", max = 1, mods = { bulwark = 0.01 },  lines = { "+1% damage per 10 max HP" } },
   { id = "wind",   name = "Second Wind",    rarity = "legendary", max = 1, mods = { revive = 1 },      lines = { "Revive once at 50% HP" } },
   { id = "archmage", name = "Archmage",     rarity = "legendary", max = 1, mods = { aoedmg_x = 2, gundmg_x = 0.5 }, lines = { "x2 area + spell damage", "!x0.5 gun damage" } },
 
   ---------------------------------------------------------------- evolutions (appear when requirements are met)
   { id = "sawstorm", name = "Saw Storm",     rarity = "legendary", max = 1, req = { saw = 4, charm = 1 },  mods = { saws = 4, sawdmg_x = 2 },     lines = { "EVOLUTION", "+4 saws", "x2 saw damage" } },
   { id = "nuke",     name = "Nuke Launcher", rarity = "legendary", max = 1, req = { w4 = 1, heavy = 1 },   mods = { area_x = 1.8, boom_x = 1.6 }, lines = { "EVOLUTION", "x1.8 explosion size", "x1.6 explosion damage" } },
-  { id = "plague",   name = "Plague Heart",  rarity = "legendary", max = 1, req = { aura = 4, bandage = 1 }, mods = { aura = 3, regen = 2 },      lines = { "EVOLUTION", "+3 aura levels", "+2 HP every 10s" } },
+  { id = "plague",   name = "Plague Heart",  rarity = "legendary", max = 1, req = { aura = 4, bandage = 1 }, mods = { aura = 3, regen = 2 },      lines = { "EVOLUTION", "+3 aura levels", "+20 HP every 10s" } },
   { id = "maiden",   name = "Iron Maiden",   rarity = "legendary", max = 1, req = { spike = 3, plate = 1 }, mods = { thornpulse = 1, armor = 2 }, lines = { "EVOLUTION", "Thorns blast every 2s", "+2 armor" } },
   { id = "inferno",  name = "Inferno",       rarity = "legendary", max = 1, req = { firering = 5, bigbang = 1 }, mods = { fireringdmg_x = 2.5, area_pct = 0.3 }, lines = { "EVOLUTION", "x2.5 Fire Ring damage", "+30% size" } },
   { id = "armageddon", name = "Armageddon",  rarity = "legendary", max = 1, req = { meteor = 4, demo = 1 }, mods = { meteor = 3, meteordmg_x = 1.5 }, lines = { "EVOLUTION", "+3 meteors", "x1.5 meteor damage" } },
   { id = "zero",     name = "Absolute Zero", rarity = "legendary", max = 1, req = { frost = 3, permafrost = 1 }, mods = { frostcd_x = 0.5, frost = 1 }, lines = { "EVOLUTION", "Frost Nova every 3s", "+1 nova level" } },
 }
 
-I.SNACK = { id = "snack", name = "Snack", rarity = "common", max = 999, mods = {}, lines = { "Heal 5 HP" }, heal = 5, parsed = {} }
+I.SNACK = { id = "snack", name = "Snack", rarity = "common", max = 999, mods = {}, lines = { "Heal 50 HP" }, heal = 5, parsed = {} }
 
 local function parseMods(mods, where)
   local out = {}
@@ -137,7 +137,7 @@ I.parseMods = parseMods
 -- endless small upgrades offered once the item pool runs dry
 I.FILLERS = {
   { id = "shard_dmg",  name = "Power Shard",  rarity = "common", max = 999, mods = { dmg_pct = 0.04 },   lines = { "+4% all damage", "(endless)" } },
-  { id = "shard_hp",   name = "Vital Shard",  rarity = "common", max = 999, mods = { maxhp = 2 },        lines = { "+2 max HP", "(endless)" }, heal = 2 },
+  { id = "shard_hp",   name = "Vital Shard",  rarity = "common", max = 999, mods = { maxhp = 2 },        lines = { "+20 max HP", "(endless)" }, heal = 2 },
   { id = "shard_rate", name = "Haste Shard",  rarity = "common", max = 999, mods = { rate_pct = 0.03 },  lines = { "+3% fire rate", "(endless)" } },
   { id = "shard_area", name = "Rune Shard",   rarity = "common", max = 999, mods = { aoedmg_pct = 0.05 }, lines = { "+5% area damage", "(endless)" } },
 }
@@ -152,11 +152,11 @@ for _, it in ipairs(I.LIST) do
   it.parsed = parseMods(it.mods, "item " .. it.id)
 end
 
--- stats whose flat bonuses are added after multipliers
-local FLAT_AFTER_MULT = { maxhp = true }
-
 -- owned: id -> stacks.  extra: list of { stat, kind, value, times } (skill tree)
-function I.compute(owned, extra)
+-- order (optional): item ids in pickup order. Max HP is then built step by step:
+-- skill tree first, then each pickup in order, so a multiplier (Glass Cannon,
+-- Juggernaut) changes the HP you have at that moment and later +HP counts fully.
+function I.compute(owned, extra, order)
   local flat, pct, mul = {}, {}, {}
   for k in pairs(I.BASE) do flat[k], pct[k], mul[k] = 0, 0, 1 end
   local function add(stat, kind, v, n)
@@ -167,7 +167,9 @@ function I.compute(owned, extra)
   for id, n in pairs(owned) do
     local it = I.byId[id]
     if it then
-      for _, m in ipairs(it.parsed) do add(m[1], m[2], m[3], n) end
+      for _, m in ipairs(it.parsed) do
+        if not (order and m[1] == "maxhp") then add(m[1], m[2], m[3], n) end
+      end
     end
   end
   if extra then
@@ -175,15 +177,31 @@ function I.compute(owned, extra)
   end
   local out = {}
   for k, base in pairs(I.BASE) do
-    local p = math.max(0, 1 + pct[k])
-    if FLAT_AFTER_MULT[k] then
-      -- "+3 max HP" always means +3: multipliers (Glass Cannon, Juggernaut) only touch base + %
-      out[k] = base * p * mul[k] + flat[k] * p
-    else
-      out[k] = (base + flat[k]) * p * mul[k]
+    out[k] = (base + flat[k]) * math.max(0, 1 + pct[k]) * mul[k]
+  end
+  if order then
+    local p = math.max(0, 1 + pct.maxhp)
+    local hp = out.maxhp
+    for _, id in ipairs(order) do
+      local it = I.byId[id]
+      if it then
+        for _, m in ipairs(it.parsed) do
+          if m[1] == "maxhp" then
+            if m[2] == "flat" then hp = hp + m[3] * p
+            elseif m[2] == "x" then hp = hp * m[3]
+            else hp = hp * (1 + m[3]) end
+          end
+        end
+      end
     end
+    out.maxhp = hp
   end
   return out
+end
+
+function I.hasHpMod(it)
+  for _, m in ipairs(it.parsed or {}) do if m[1] == "maxhp" then return true end end
+  return false
 end
 
 -- armor: each point is worth a bit less than the last, no hard cap
