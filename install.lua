@@ -12,6 +12,7 @@ local FILES = {
   "dz/items.lua",
   "dz/tree.lua",
   "dz/profile.lua",
+  "dz/patchnotes.lua",
   "deadzone.lua",
   "speedtest.lua",
 }

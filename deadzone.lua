@@ -22,6 +22,7 @@ local World = require("dz.world")
 local I = require("dz.items")
 local Tree = require("dz.tree")
 local Prof = require("dz.profile")
+local Notes = require("dz.patchnotes")
 
 local floor, ceil, sqrt, abs = math.floor, math.ceil, math.sqrt, math.abs
 local min, max, random = math.min, math.max, math.random
@@ -159,7 +160,7 @@ local prof = Prof.load("Guest")
 local world
 local p, R, stats, owned
 local mobs, bullets, eshots, gems, pickups, parts, beams, strikes, fires, orbs
-local UI = { showNums = true, msg = "", msgCol = S.Y, msgTimer = 0, shake = 0, treeSel = "root", prestigeArm = 0, nameBuf = "", board = {} }
+local UI = { notesScroll = 0, showNums = true, msg = "", msgCol = S.Y, msgTimer = 0, shake = 0, treeSel = "root", prestigeArm = 0, nameBuf = "", board = {} }
 local grid = {}
 
 local function secs() return R.tick / TPS end
@@ -2157,7 +2158,9 @@ local function renderTitle()
   if frame % 20 < 14 then center(y0 + 17, "SPACE  start run", S.g) end
   center(y0 + 19, "T  skill tree", S.C)
   center(y0 + 20, "N  type a name to log in", S.A)
-  center(y0 + 21, "Q  quit", S.A)
+  center(y0 + 21, "V  patch notes", S.A)
+  center(y0 + 22, "Q  quit", S.A)
+  T(x0 + w - #Notes.VERSION - 2, y0 + h - 2, Notes.VERSION, S.A)
   if detector then
     center(y0 + 24, "Player Detector: connected", S.g)
     center(y0 + 25, "Stand next to it (or right-click it) to log in", S.Y)
@@ -2198,6 +2201,26 @@ local function renderTitle()
   end
 
   if UI.msgTimer > 0 then center(y0 + h + 2, " " .. UI.msg .. " ", UI.msgCol, S.K) end
+end
+
+local function renderNotes()
+  local w, h = min(CW - 6, 100), CH - 8
+  local x0, y0 = floor((CW - w) / 2) + 1, floor((CH - h) / 2) + 1
+  frameBox(x0, y0, w, h, S.D)
+  center(y0 + 1, "PATCH NOTES   -   DEAD ZONE " .. Notes.VERSION, S.Y)
+  local lines = {}
+  for _, v in ipairs(Notes.LIST) do
+    lines[#lines + 1] = { v[1] .. "   " .. v[2], S.C }
+    for _, l in ipairs(v[3]) do lines[#lines + 1] = { "  " .. l, S.W } end
+    lines[#lines + 1] = { "", S.W }
+  end
+  local rows = h - 6
+  UI.notesScroll = max(0, min(UI.notesScroll, #lines - rows))
+  for i = 1, rows do
+    local l = lines[i + UI.notesScroll]
+    if l then T(x0 + 3, y0 + 2 + i, l[1]:sub(1, w - 6), l[2]) end
+  end
+  center(y0 + h - 2, "W / S scroll        V or Q back", S.A)
 end
 
 local function renderNaming()
@@ -2310,11 +2333,12 @@ local function render()
   if state == "tree" then
     renderTree()
   else
-    if state == "title" or state == "naming" then p.x = p.x + 0.6 end
+    if state == "title" or state == "naming" or state == "notes" then p.x = p.x + 0.6 end
     renderWorld()
-    if state ~= "title" and state ~= "naming" then renderHUD() end
+    if state ~= "title" and state ~= "naming" and state ~= "notes" then renderHUD() end
     if state == "title" then renderTitle()
     elseif state == "naming" then renderTitle(); renderNaming()
+    elseif state == "notes" then renderNotes()
     elseif state == "pick" then renderPick()
     elseif state == "paused" then renderPause()
     elseif state == "dead" then renderDead() end
@@ -2341,7 +2365,12 @@ local function onKey(k)
     if k == keys.space or k == keys.enter then startRun()
     elseif k == keys.t then state = "tree"
     elseif k == keys.n then state = "naming"; UI.nameBuf = ""
+    elseif k == keys.v then state = "notes"; UI.notesScroll = 0
     elseif k == keys.q then running = false end
+  elseif state == "notes" then
+    if k == keys.w or k == keys.up then UI.notesScroll = UI.notesScroll - 3
+    elseif k == keys.s or k == keys.down then UI.notesScroll = UI.notesScroll + 3
+    elseif k == keys.v or k == keys.q or k == keys.enter then state = "title" end
   elseif state == "naming" then
     if k == keys.enter then
       if #UI.nameBuf > 0 then login(UI.nameBuf) end
