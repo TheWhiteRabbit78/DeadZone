@@ -225,7 +225,7 @@ local function newRun()
     offers = nil, offerKind = nil, banishMode = false,
     deadTimer = 0, newBest = false, soulsEarned = 0, mult = 1, res = 0, nextSwarm = 360 * TPS, boomQ = {},
     spell = { meteor = 0, frost = 0, thunder = 0, orbs = 0, mortar = 0, ring = 0, fire = 0 },
-    outposts = {}, activeOutposts = {}, followers = {}, survivor = nil, nextSurvivor = 50 * TPS,
+    outposts = {}, activeOutposts = {}, followers = {}, survivor = nil, nextSurvivor = 180 * TPS,
     rescued = 0, nestsCleared = 0,
     dmgSrc = {}, dmgTick = 0, dmgHist = {}, dmgSum = 0, dps = 0, nums = {},
   }
@@ -1403,19 +1403,28 @@ function C.updateNest(m, s, dist)
   end
 end
 
+local OUTPOST_TIME = 300   -- outposts only show up from minute 5
+
 function C.updateOutposts(s)
+  if s < OUTPOST_TIME then return end
+  if not R.outpostsAnnounced then
+    R.outpostsAnnounced = true
+    say("Survivor outposts spotted - follow the flags!", 80, S.C)
+  end
   if R.tick % 10 == 1 then
     local n = world.outpostsNear(p.x, p.y, 340, OUT_TMP)
     local act = {}
     for i = 1, n do
       local site = OUT_TMP[i]
       local o = R.outposts[site.key]
-      if not o then
+      -- a camp is only "found" while it's off-screen, so none pop in under your feet
+      local dx, dy = site.x - p.x, site.y - p.y
+      if not o and dx * dx + dy * dy > 230 * 230 then
         local mh = 80 * (1 + 0.2 * s / 60)
         o = { x = site.x, y = site.y, hp = mh, maxHp = mh, state = "alive", cd = { 0, 7, 0 }, flip = { false, false, false } }
         R.outposts[site.key] = o
       end
-      act[#act + 1] = o
+      if o then act[#act + 1] = o end
     end
     R.activeOutposts = act
   end
@@ -1829,7 +1838,7 @@ local function renderWorld()
     end
   end
   -- off-screen outposts nearby: flag marker on the screen edge
-  if frame % 20 < 14 then
+  if frame % 20 < 14 and secs() >= OUTPOST_TIME then
     local n = world.outpostsNear(p.x, p.y, 460, OUT_TMP)
     for i = 1, n do
       local site = OUT_TMP[i]

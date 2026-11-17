@@ -16,7 +16,7 @@ local W = {}
 local RW, RH = 48, 40             -- one prop chance per region of this size
 local DECO_GRID = 8
 local LW, LH = 360, 300           -- one lake chance per region of this size
-local OW, OH = 420, 340           -- one outpost chance per region of this size
+local OW, OH = 640, 520           -- one outpost chance per region of this size
 
 function W.new(spr, seed)
   local self = {}
@@ -276,17 +276,32 @@ function W.new(spr, seed)
   -- outpost sites ------------------------------------------------------------
   -- returns { key, x, y } or false. (x, y) = centre of the camp (tent foot)
   local outCache = {}
+  local function rawSite(ox, oy)
+    if hash(ox, oy, 21) >= 0.45 then return nil end
+    local x = ox * OW + 90 + floor(hash(ox, oy, 22) * (OW - 180))
+    local y = oy * OH + 90 + floor(hash(ox, oy, 23) * (OH - 180))
+    if x * x + y * y <= 300 * 300 or waterEdge(x, y) <= 50 then return nil end
+    return x, y
+  end
+  local MIN_GAP = 450   -- camps never closer than this to each other
   local function outpostAt(ox, oy)
     local key = ox * 65536 + oy
     local o = outCache[key]
     if o ~= nil then return o end
     o = false
-    if hash(ox, oy, 21) < 0.55 then
-      local x = ox * OW + 70 + floor(hash(ox, oy, 22) * (OW - 140))
-      local y = oy * OH + 70 + floor(hash(ox, oy, 23) * (OH - 140))
-      if x * x + y * y > 170 * 170 and waterEdge(x, y) > 50 then
-        o = { key = key, x = x, y = y }
+    local x, y = rawSite(ox, oy)
+    if x then
+      local ok = true
+      -- the neighbour with the smaller key wins when two camps are too close
+      for yy = oy - 1, oy + 1 do
+        for xx = ox - 1, ox + 1 do
+          if (xx ~= ox or yy ~= oy) and xx * 65536 + yy < key then
+            local nx, ny = rawSite(xx, yy)
+            if nx and (nx - x) ^ 2 + (ny - y) ^ 2 < MIN_GAP * MIN_GAP then ok = false end
+          end
+        end
       end
+      if ok then o = { key = key, x = x, y = y } end
     end
     outCache[key] = o
     return o
