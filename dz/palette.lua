@@ -24,6 +24,18 @@ P.list = {
   { "K", 15,  21,  21,  21 }, -- outline black
 }
 
+-- night palette for the menu screens (skill tree, title, notes, death).
+-- Text slots keep their meaning (W O C Y g D A R K); the rest become sky,
+-- skyline and card colours.
+P.NIGHT = {
+  { 0, 236, 230, 210 }, { 1, 232, 118, 30 }, { 2, 44, 28, 72 },  { 3, 94, 230, 230 },
+  { 4, 242, 211, 74 },  { 5, 112, 204, 88 }, { 6, 88, 42, 94 },  { 7, 66, 58, 90 },
+  { 8, 146, 138, 168 }, { 9, 146, 62, 94 },  { 10, 20, 14, 40 }, { 11, 38, 33, 60 },
+  { 12, 42, 27, 64 },   { 13, 23, 15, 33 },  { 14, 214, 58, 52 }, { 15, 10, 8, 16 },
+}
+-- night slot names
+P.N = { SKY1 = 10, SKY2 = 2, SKY3 = 6, SKY4 = 9, FAR = 12, NEAR = 13, FACE = 11 }
+
 P.slot = {}    -- letter -> slot number
 P.rgb = {}     -- slot -> {r,g,b}
 for _, e in ipairs(P.list) do
@@ -40,6 +52,27 @@ for a = 0, 15 do
     local dr, dg, db = ca[1] - cb[1], ca[2] - cb[2], ca[3] - cb[3]
     P.dist[a][b] = dr * dr + dg * dg + db * db
   end
+end
+
+-- switch the active palette ("day" = game, "night" = menus). Tables are
+-- changed in place so gfx sees the new colour distances at once.
+P.current = "day"
+function P.use(which)
+  local src = {}
+  if which == "night" then
+    for _, e in ipairs(P.NIGHT) do src[e[1]] = { e[2], e[3], e[4] } end
+  else
+    for _, e in ipairs(P.list) do src[e[2]] = { e[3], e[4], e[5] } end
+  end
+  for slot = 0, 15 do local c, n = P.rgb[slot], src[slot]; c[1], c[2], c[3] = n[1], n[2], n[3] end
+  for a = 0, 15 do
+    for b = 0, 15 do
+      local ca, cb = P.rgb[a], P.rgb[b]
+      local dr, dg, db = ca[1] - cb[1], ca[2] - cb[2], ca[3] - cb[3]
+      P.dist[a][b] = dr * dr + dg * dg + db * db
+    end
+  end
+  P.current = which
 end
 
 -- apply / restore on a terminal or monitor

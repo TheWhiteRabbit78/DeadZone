@@ -23,6 +23,7 @@ local I = require("dz.items")
 local Tree = require("dz.tree")
 local Prof = require("dz.profile")
 local Notes = require("dz.patchnotes")
+local Sc = require("dz.scenery")
 
 local floor, ceil, sqrt, abs = math.floor, math.ceil, math.sqrt, math.abs
 local min, max, random = math.min, math.max, math.random
@@ -46,6 +47,8 @@ elseif not native.isColour() then
 end
 P.apply(out)
 local scr = G.new(out)
+local Scn = Sc.new(scr, G, P)
+local FACE = P.N.FACE
 local PW, PH, CW, CH = scr.PW, scr.PH, scr.CW, scr.CH
 local speaker = peripheral.find("speaker")
 -- find the Player Detector by any type spelling (playerDetector / player_detector / ...)
@@ -160,7 +163,7 @@ local prof = Prof.load("Guest")
 local world
 local p, R, stats, owned
 local mobs, bullets, eshots, gems, pickups, parts, beams, strikes, fires, orbs
-local UI = { notesScroll = 0, showNums = true, msg = "", msgCol = S.Y, msgTimer = 0, shake = 0, treeSel = "root", prestigeArm = 0, nameBuf = "", board = {} }
+local UI = { notesScroll = 0, showNums = true, msg = "", msgCol = S.Y, msgTimer = 0, shake = 0, treeSel = "root", tcx = 0, tcy = 0, menuCam = 0, tbg = 15, prestigeArm = 0, nameBuf = "", board = {} }
 local grid = {}
 
 local function secs() return R.tick / TPS end
@@ -1705,7 +1708,7 @@ local function fmtTime(s)
   return ("%02d:%02d"):format(floor(s / 60), s % 60)
 end
 
-local function T(x, y, s, fg, bg) scr.text(x, y, s, fg, bg or S.K) end
+local function T(x, y, s, fg, bg) scr.text(x, y, s, fg, bg or UI.tbg) end
 local function center(y, s, fg, bg) T(floor((CW - #s) / 2) + 1, y, s, fg, bg) end
 local function box(x, y, w, h, bg)
   local blank = (" "):rep(w)
@@ -2116,7 +2119,7 @@ end
 local function renderDead()
   local w, h = 72, 30
   local x0, y0 = floor((CW - w) / 2) + 1, floor((CH - h) / 2) + 1
-  frameBox(x0, y0, w, h, S.R)
+  Scn.panel(x0, y0, w, h, S.R, true)
   center(y0 + 2, "Y O U   D I E D", S.R)
   center(y0 + 5, "Survived " .. fmtTime(secs()), S.W)
   center(y0 + 6, ("Level %d    Kills %d    Bosses %d"):format(p.level, R.kills, R.bossKills), S.W)
@@ -2139,12 +2142,13 @@ local function renderDead()
 end
 
 local function renderTitle()
-  -- centre: logo + controls
-  local w, h = 62, 30
-  local x0, y0 = floor((CW - w) / 2) + 1, floor((CH - h) / 2) + 1
-  frameBox(x0, y0, w, h, S.D)
-  center(y0 + 2, "D  E  A  D     Z  O  N  E", S.R)
-  center(y0 + 3, "survive the endless undead", S.A)
+  -- logo over the sky, then the centre panel: controls + menu
+  local w, h = 62, 21
+  local top = floor((CH - (h + 13)) / 2) + 1
+  local x0, y0 = floor((CW - w) / 2) + 1, top + 12
+  Scn.logo(floor((PW - Scn.logoW) / 2), (top - 1) * 3 + 2, frame)
+  Scn.panel(x0, y0, w, h, S.R, true)
+  center(y0 + 1, "survive the endless undead", S.A)
   local lines = {
     "WASD        move",
     "SPACE       shoot (hold)",
@@ -2154,26 +2158,26 @@ local function renderTitle()
     "R / B       reroll / banish items",
     "P           pause / see your build",
   }
-  for i, l in ipairs(lines) do T(x0 + 13, y0 + 5 + i, l, S.W) end
-  if frame % 20 < 14 then center(y0 + 17, "SPACE  start run", S.g) end
-  center(y0 + 19, "T  skill tree", S.C)
-  center(y0 + 20, "N  type a name to log in", S.A)
-  center(y0 + 21, "V  patch notes", S.A)
-  center(y0 + 22, "Q  quit", S.A)
-  T(x0 + w - #Notes.VERSION - 2, y0 + h - 2, Notes.VERSION, S.A)
+  for i, l in ipairs(lines) do T(x0 + 13, y0 + 2 + i, l, S.W) end
+  if frame % 20 < 14 then center(y0 + 11, "SPACE  start run", S.g) end
+  center(y0 + 12, "T  skill tree", S.C)
+  center(y0 + 13, "N  type a name to log in", S.A)
+  center(y0 + 14, "V  patch notes", S.A)
+  center(y0 + 15, "Q  quit", S.A)
+  T(x0 + w - #Notes.VERSION - 1, y0 + h - 1, Notes.VERSION, S.D)
   if detector then
-    center(y0 + 24, "Player Detector: connected", S.g)
-    center(y0 + 25, "Stand next to it (or right-click it) to log in", S.Y)
+    center(y0 + 17, "Player Detector: connected", S.g)
+    center(y0 + 18, "Stand next to it (or right-click it) to log in", S.Y)
   else
-    center(y0 + 24, "Player Detector: not found", S.R)
-    center(y0 + 25, "It must touch the computer (or use a wired modem)", S.A)
+    center(y0 + 17, "Player Detector: not found", S.R)
+    center(y0 + 18, "It must touch the computer (or use a wired modem)", S.A)
   end
 
   -- left: profile
   local lw = 34
   local lx = x0 - lw - 4
   if lx >= 2 then
-    frameBox(lx, y0, lw, 16, S.D)
+    Scn.panel(lx, y0, lw, 16, S.D)
     T(lx + 2, y0 + 1, "PLAYER", S.A)
     T(lx + 2, y0 + 3, prof.name, S.Y)
     if prof.prestige > 0 then T(lx + 2, y0 + 4, "Prestige " .. prof.prestige .. " " .. stars(prof.prestige), S.O) end
@@ -2190,9 +2194,9 @@ local function renderTitle()
   -- right: leaderboard
   local rx = x0 + w + 4
   if rx + 36 <= CW then
-    frameBox(rx, y0, 36, 16, S.D)
+    Scn.panel(rx, y0, 36, 16, S.D)
     T(rx + 2, y0 + 1, "LEADERBOARD", S.Y)
-    if #UI.board == 0 then T(rx + 2, y0 + 3, "no runs yet", S.D) end
+    if #UI.board == 0 then T(rx + 2, y0 + 3, "no runs yet", S.A) end
     for i, e in ipairs(UI.board) do
       local name = e.name:sub(1, 12)
       local ps = (e.prestige or 0) > 0 and ("P" .. e.prestige) or "  "
@@ -2206,7 +2210,7 @@ end
 local function renderNotes()
   local w, h = min(CW - 6, 100), CH - 8
   local x0, y0 = floor((CW - w) / 2) + 1, floor((CH - h) / 2) + 1
-  frameBox(x0, y0, w, h, S.D)
+  Scn.panel(x0, y0, w, h, S.C, true)
   center(y0 + 1, "PATCH NOTES   -   DEAD ZONE " .. Notes.VERSION, S.Y)
   local lines = {}
   for _, v in ipairs(Notes.LIST) do
@@ -2220,13 +2224,13 @@ local function renderNotes()
     local l = lines[i + UI.notesScroll]
     if l then T(x0 + 3, y0 + 2 + i, l[1]:sub(1, w - 6), l[2]) end
   end
-  center(y0 + h - 2, "W / S scroll        V or Q back", S.A)
+  center(y0 + h - 2, "W/S or arrows scroll        V or Q back", S.A)
 end
 
 local function renderNaming()
   local w, h = 50, 9
   local x0, y0 = floor((CW - w) / 2) + 1, floor((CH - h) / 2) + 1
-  frameBox(x0, y0, w, h, S.Y)
+  Scn.panel(x0, y0, w, h, S.Y, true)
   center(y0 + 1, "TYPE YOUR NAME", S.Y)
   local shown = UI.nameBuf .. ((frame % 10 < 5) and "_" or " ")
   center(y0 + 4, shown, S.W)
@@ -2234,114 +2238,184 @@ local function renderNaming()
 end
 
 ---------------------------------------------------------------------- render: skill tree
-local TREE_SX, TREE_SY, BOX_W = 22, 6, 18
+local TREE_SX, TREE_SY, CARD_W, CARD_H = 26, 8, 22, 5
+local BCOL = { root = S.g, fire = S.O, arcana = S.C, fort = S.R, fortune = S.Y }
+
+local function treeTarget()
+  local n = Tree.byId[UI.treeSel]
+  return n.x * TREE_SX * 2, n.y * TREE_SY * 3
+end
+
+-- one skill card, top-left text cell (cx0, cy0)
+local function drawCard(n, cx0, cy0, sel)
+  local lv = prof.tree
+  local l = lv[n.id] or 0
+  local unlocked = Tree.unlocked(n, lv)
+  local bc = BCOL[n.branch]
+  local maxed = l >= n.max
+  local cost = (not maxed) and Tree.cost(n, l + 1) or 0
+  local afford = unlocked and not maxed and prof.souls >= cost
+  local apex = n.id:match("_apex$")
+  local key = n.key or apex
+  local face = unlocked and FACE or S.K
+  local frameC
+  if sel then frameC = S.W
+  elseif not unlocked then frameC = S.D
+  elseif key then frameC = S.Y
+  elseif l > 0 then frameC = bc
+  elseif afford then frameC = (frame % 20 < 10) and bc or S.A
+  else frameC = S.A end
+  local x0, y0 = (cx0 - 1) * 2, (cy0 - 1) * 3
+  local w, h = CARD_W * 2, CARD_H * 3
+  -- face behind the icon and the level bar (the rest is text)
+  scr.rect(x0 + 2, y0 + 3, 10, 9, face)
+  if not key then scr.rect(x0 + 12, y0 + 6, 20, 3, face) end
+  Scn.frame(x0, y0, w, h, frameC, sel or maxed or key, (key and not sel) and S.W or nil)
+  if maxed and not sel then -- shine running along the top edge
+    local p = (frame * 2 + cx0 * 3) % (w + 30)
+    if p < w - 5 then scr.pixel(x0 + 2 + p, y0 + 2, S.W); scr.pixel(x0 + 3 + p, y0 + 2, S.W) end
+  end
+  local icol = unlocked and ((l > 0 or sel) and bc or S.A) or S.D
+  Scn.icon(unlocked and Sc.iconFor(n) or "lock", x0 + 2, y0 + 3, icol)
+  -- text
+  local tx = cx0 + 6
+  local function line(y, str, col) T(tx, y, str .. (" "):rep(15 - #str), col, face) end
+  line(cy0 + 1, n.name:sub(1, 15), sel and S.W or (unlocked and ((l > 0) and S.W or S.A) or S.D))
+  if key then
+    line(cy0 + 2, n.key and (l > 0 and "KEYSTONE  OWNED" or "KEYSTONE") or ("APEX " .. l .. "/" .. n.max), unlocked and S.Y or S.D)
+  else
+    if unlocked then
+      local per = max(1, floor(10 / n.max))
+      for i = 1, n.max do
+        scr.rect((tx - 1 + (i - 1) * per) * 2, y0 + 7, per * 2 - 1, 2, (i <= l) and bc or S.D)
+      end
+    end
+    local lt = l .. "/" .. n.max
+    T(cx0 + 16, cy0 + 2, (" "):rep(5 - #lt) .. lt, unlocked and ((l > 0) and bc or S.A) or S.D, face)
+  end
+  if maxed then line(cy0 + 3, "MAX", S.Y)
+  elseif not unlocked then line(cy0 + 3, "locked", S.D)
+  else line(cy0 + 3, cost .. " souls", afford and S.g or S.R) end
+end
 
 local function renderTree()
-  scr.fillBase(function() return BLACK end)
-  local sel = Tree.byId[UI.treeSel]
-  local topRow, bottomRow = 3, CH - 11
-  local midX = floor(CW / 2)
-  local midY = floor((topRow + bottomRow) / 2)
-  local function cellOf(n)
-    return midX + (n.x - sel.x) * TREE_SX, midY + (n.y - sel.y) * TREE_SY
-  end
-  local lv = prof.tree
+  -- camera glides to the selected card
+  local tx, ty = treeTarget()
+  UI.tcx = UI.tcx + (tx - UI.tcx) * 0.3
+  UI.tcy = UI.tcy + (ty - UI.tcy) * 0.3
+  if abs(tx - UI.tcx) < 0.6 then UI.tcx = tx end
+  if abs(ty - UI.tcy) < 0.6 then UI.tcy = ty end
+  local camX, camY = UI.tcx, UI.tcy
+  Scn.background(camX, camY, frame)
+  Scn.embers(camX, camY, frame)
 
-  -- connections (pixel layer)
+  local lv = prof.tree
+  local bottomRow = CH - 11
+  local midX, midY = floor(CW / 2), floor((3 + bottomRow) / 2)
+  local function cellOf(n)
+    return midX + floor((n.x * TREE_SX * 2 - camX) / 2 + 0.5), midY + floor((n.y * TREE_SY * 3 - camY) / 3 + 0.5)
+  end
+  local pyMin, pyMax = 3, (bottomRow - 1) * 3
+
+  -- links between cards (thick, dotted while not owned, light pulse when owned)
   for _, n in ipairs(Tree.NODES) do
     if n.parent then
       local par = Tree.byId[n.parent]
       local ax, ay = cellOf(par)
       local bx, by = cellOf(n)
-      local col = ((lv[n.id] or 0) > 0) and P.slot[Tree.BRANCH_COL[n.branch]] or S.D
-      local px1, py1, px2, py2 = ax * 2 - 1, ay * 3 - 2, bx * 2 - 1, by * 3 - 2
-      local steps = max(abs(px2 - px1), abs(py2 - py1))
-      for i = 0, steps do
-        local x = px1 + (px2 - px1) * i / steps
-        local y = py1 + (py2 - py1) * i / steps
-        if y >= (topRow - 1) * 3 and y < bottomRow * 3 then scr.pixel(x, y, col) end
+      local px1, py1, px2, py2 = (ax - 1) * 2, (ay - 1) * 3 + 1, (bx - 1) * 2, (by - 1) * 3 + 1
+      if not ((px1 < -60 and px2 < -60) or (px1 > PW + 60 and px2 > PW + 60) or (py1 < 0 and py2 < 0) or (py1 > PH and py2 > PH)) then
+        local owned = (lv[n.id] or 0) > 0
+        local col = owned and BCOL[n.branch] or S.D
+        local steps = max(1, abs(px2 - px1), abs(py2 - py1))
+        local pulse = owned and ((frame * 2 + n.x * 7 + n.y * 5) % (steps + 20)) or -99
+        for i = 0, steps do
+          if owned or floor(i / 3) % 2 == 0 then
+            local x = px1 + floor((px2 - px1) * i / steps + 0.5)
+            local y = py1 + floor((py2 - py1) * i / steps + 0.5)
+            if y >= pyMin and y < pyMax then
+              local c = (abs(i - pulse) <= 1) and S.W or col
+              scr.rect(x, y, 2, 2, c)
+            end
+          end
+        end
       end
     end
   end
 
-  -- nodes (text layer)
+  -- cards (selected one last so it sits on top)
+  local selCard
   for _, n in ipairs(Tree.NODES) do
     local cx, cy = cellOf(n)
-    local x = cx - floor(BOX_W / 2)
-    if cy - 1 >= topRow and cy + 1 <= bottomRow and x + BOX_W >= 1 and x <= CW then
-      local l = lv[n.id] or 0
-      local bcol = P.slot[Tree.BRANCH_COL[n.branch]]
-      local unlocked = Tree.unlocked(n, lv)
-      local bg, fg, sub
-      if n.id == UI.treeSel then bg, fg = S.W, S.K
-      elseif l >= n.max then bg, fg = bcol, S.K
-      elseif l > 0 then bg, fg = S.D, bcol
-      elseif unlocked then bg, fg = S.D, S.W
-      else bg, fg = S.K, S.A end
-      local name = n.name:sub(1, BOX_W - 2)
-      local lvTxt = ("%d/%d"):format(l, n.max)
-      if n.key then lvTxt = l > 0 and "KEYSTONE" or "keystone" end
-      if l >= n.max then sub = "MAX"
-      elseif not unlocked then sub = "locked"
-      else sub = Tree.cost(n, l + 1) .. " souls" end
-      local pad = function(s) s = s:sub(1, BOX_W - 2); return " " .. s .. (" "):rep(BOX_W - 1 - #s) end
-      T(x, cy - 1, pad(name), fg, bg)
-      T(x, cy, pad(lvTxt), fg, bg)
-      local subCol = fg
-      if l < n.max and unlocked and n.id ~= UI.treeSel then subCol = (prof.souls >= Tree.cost(n, l + 1)) and S.g or S.R end
-      T(x, cy + 1, pad(sub), subCol, bg)
+    local x0, y0 = cx - floor(CARD_W / 2), cy - 2
+    if x0 + CARD_W >= 1 and x0 <= CW and y0 >= 2 and y0 + CARD_H - 1 <= bottomRow then
+      if n.id == UI.treeSel then selCard = { n, x0, y0 } else drawCard(n, x0, y0, false) end
     end
   end
+  if selCard then drawCard(selCard[1], selCard[2], selCard[3], true) end
 
   -- header
-  box(1, 1, CW, 1, S.K)
-  T(2, 1, "SKILL TREE", S.Y)
-  T(16, 1, prof.name .. (prof.prestige > 0 and ("  Prestige " .. prof.prestige .. " " .. stars(prof.prestige)) or ""), S.W)
+  T(1, 1, (" "):rep(CW), S.W, S.K)
+  T(3, 1, "SKILL TREE", S.Y, S.K)
+  T(17, 1, prof.name .. (prof.prestige > 0 and ("   Prestige " .. prof.prestige .. " " .. stars(prof.prestige)) or ""), S.W, S.K)
   local soulsTxt = "Souls " .. prof.souls
-  T(CW - #soulsTxt - 1, 1, soulsTxt, S.C)
+  T(CW - #soulsTxt - 1, 1, soulsTxt, S.C, S.K)
 
-  -- info panel
-  local py = CH - 9
-  box(1, py - 1, CW, 11, S.D)
-  box(2, py, CW - 2, 9, S.K)
+  -- info panel: big icon + text
+  local sel = Tree.byId[UI.treeSel]
   local l = lv[sel.id] or 0
-  local bcol = P.slot[Tree.BRANCH_COL[sel.branch]]
-  T(4, py + 1, sel.name, bcol)
-  T(4 + #sel.name + 3, py + 1, ("level %d / %d"):format(l, sel.max), S.W)
-  T(4, py + 2, sel.desc .. ((sel.max > 1 and not sel.key) and "  (per level)" or ""), S.W)
+  local bcol = BCOL[sel.branch]
+  local py = CH - 8
+  local unlocked = Tree.unlocked(sel, lv)
+  Scn.panel(3, py, CW - 4, 7, bcol, true, 11)
+  Scn.icon(unlocked and Sc.iconFor(sel) or "lock", 2 * 2 + 4, (py - 1) * 3 + 2, unlocked and bcol or S.D, 2)
+  local tx = 15
+  T(tx, py, sel.name, bcol)
+  T(tx + #sel.name + 3, py, ("level %d / %d"):format(l, sel.max), S.W)
+  T(tx, py + 1, sel.desc .. ((sel.max > 1 and not sel.key) and "  (per level)" or ""), S.W)
   if l >= sel.max then
-    T(4, py + 4, "MAXED", S.g)
-  elseif not Tree.unlocked(sel, lv) then
-    T(4, py + 4, "Locked - buy " .. Tree.byId[sel.parent].name .. " first", S.R)
+    T(tx, py + 3, "MAXED", S.g)
+  elseif not unlocked then
+    T(tx, py + 3, "Locked - buy " .. Tree.byId[sel.parent].name .. " first", S.R)
   else
     local cost = Tree.cost(sel, l + 1)
-    T(4, py + 4, ("Next level: %d souls"):format(cost), (prof.souls >= cost) and S.g or S.R)
+    T(tx, py + 3, ("Next level: %d souls"):format(cost), (prof.souls >= cost) and S.g or S.R)
   end
   local pr = prof.prestige
   local prTxt = ("Prestige %d/%d   base stats +%d%% of a full tree   mobs +%d%% HP   souls +%d%%"):format(
     pr, Tree.MAX_PRESTIGE, pr * 10, floor((Tree.prestigeMobHp(pr) - 1) * 100 + 0.5), floor((Tree.prestigeSouls(pr) - 1) * 100 + 0.5))
-  T(4, py + 6, prTxt, S.O)
+  T(tx, py + 5, prTxt, S.O)
   if Tree.allMaxed(lv) and pr < Tree.MAX_PRESTIGE then
-    T(4, py + 7, "EVERYTHING MAXED  -  press X to PRESTIGE", (frame % 10 < 6) and S.Y or S.O)
+    T(tx, py + 6, "EVERYTHING MAXED  -  press X to PRESTIGE", (frame % 10 < 6) and S.Y or S.O)
   end
   local keysTxt = "WASD/arrows move    SPACE buy    X prestige    Q back"
-  T(CW - #keysTxt - 3, py + 8, keysTxt, S.A)
-  if UI.msgTimer > 0 then center(py - 2, " " .. UI.msg .. " ", UI.msgCol, S.K) end
+  T(CW - #keysTxt - 3, py + 6, keysTxt, S.A)
+  if UI.msgTimer > 0 then center(py - 3, " " .. UI.msg .. " ", UI.msgCol, S.K) end
 end
 
+local MENU = { title = true, naming = true, notes = true, dead = true, tree = true }
 local function render()
-  if state == "tree" then
-    renderTree()
+  if MENU[state] then
+    if P.current ~= "night" then P.use("night"); P.apply(out) end
+    UI.tbg = FACE
+    if state == "tree" then
+      renderTree()
+    else
+      UI.menuCam = UI.menuCam + 0.6
+      Scn.background(UI.menuCam, -50, frame)
+      Scn.embers(UI.menuCam, -50, frame)
+      if state == "title" then renderTitle()
+      elseif state == "naming" then renderTitle(); renderNaming()
+      elseif state == "notes" then renderNotes()
+      elseif state == "dead" then renderDead() end
+    end
   else
-    if state == "title" or state == "naming" or state == "notes" then p.x = p.x + 0.6 end
+    if P.current ~= "day" then P.use("day"); P.apply(out) end
+    UI.tbg = S.K
     renderWorld()
-    if state ~= "title" and state ~= "naming" and state ~= "notes" then renderHUD() end
-    if state == "title" then renderTitle()
-    elseif state == "naming" then renderTitle(); renderNaming()
-    elseif state == "notes" then renderNotes()
-    elseif state == "pick" then renderPick()
-    elseif state == "paused" then renderPause()
-    elseif state == "dead" then renderDead() end
+    renderHUD()
+    if state == "pick" then renderPick()
+    elseif state == "paused" then renderPause() end
   end
   scr.present()
 end

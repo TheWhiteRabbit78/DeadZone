@@ -2,9 +2,18 @@
 
 local N = {}
 
-N.VERSION = "v2.41"
+N.VERSION = "v2.50"
 
 N.LIST = {
+  { "v2.50", "Night city menus", {
+    "Menus have their own night art: blood moon, stars, a ruined city",
+    "  with lit windows and drifting embers, all with parallax",
+    "New DEAD ZONE logo on the title screen (it drips)",
+    "Skill tree: pixel cards with an icon for every node, level pips,",
+    "  pulsing frames when you can afford a level, gold keystones",
+    "Skill tree camera glides between cards, links glow once owned",
+    "Big icon of the selected node in the info panel",
+  } },
   { "v2.41", "Arrow keys in the skill tree", {
     "Arrow keys move around the skill tree, same as WASD",
   } },
