@@ -10,6 +10,8 @@ local FILES = {
   "dz/sprites.lua",
   "dz/world.lua",
   "dz/items.lua",
+  "dz/tree.lua",
+  "dz/profile.lua",
   "deadzone.lua",
   "speedtest.lua",
 }
@@ -50,6 +52,10 @@ for name, prog in pairs(LAUNCHERS) do
 end
 
 if failed == 0 then
+  if not os.getComputerLabel() then
+    os.setComputerLabel("deadzone")
+    print("Labelled this computer 'deadzone' so saves survive if it's picked up.")
+  end
   print("Done. Run: deadzone")
 else
   print(failed .. " file(s) failed - try again.")

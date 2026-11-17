@@ -250,4 +250,12 @@ S.saw2 = {
   "..A..",
 }
 
+S.meteor = {
+  ".OO..",
+  "OYYO.",
+  "OYWYO",
+  ".OYO.",
+  "..O..",
+}
+
 return S

@@ -1,14 +1,14 @@
 --[[
-  DEAD ZONE  v1  -  pixel-art roguelite survivor shooter for CC:Tweaked
+  DEAD ZONE  v2  -  pixel-art roguelite survivor shooter for CC:Tweaked
   Advanced Computer + Advanced Monitor wall (max size 8x6 recommended)
-  Optional: a Speaker next to the computer for sound.
+  Optional: Speaker (sound), Player Detector (log in by right-clicking it)
 
   Keep the computer's screen open while playing - it's your controller.
     WASD        move (8 directions)
     SPACE       shoot where you face (hold for auto-fire)
     ARROWS      aim + shoot in that direction
     1 2 3 4     switch weapon
-    1 2 3       pick an item on level up,  R = reroll
+    1 2 3 (4)   pick an item on level up,  R reroll,  B banish
     P           pause (shows your build)
 ]]
 
@@ -20,6 +20,8 @@ local G = require("dz.gfx")
 local SPR = require("dz.sprites")
 local World = require("dz.world")
 local I = require("dz.items")
+local Tree = require("dz.tree")
+local Prof = require("dz.profile")
 
 local floor, ceil, sqrt, abs = math.floor, math.ceil, math.sqrt, math.abs
 local min, max, random = math.min, math.max, math.random
@@ -28,10 +30,10 @@ local atan2 = math.atan2 or math.atan
 
 local TPS = 20
 local MAX_MOBS = 150
-local SAVE_FILE = "/" .. dir .. "/save.dat"
 local S = P.slot
+local HEX = G.HEX
 
----------------------------------------------------------------------- display
+---------------------------------------------------------------------- display + peripherals
 local native = term.current()
 local mon = peripheral.find("monitor", function(_, m) return m.isColour() end)
 local out = native
@@ -44,12 +46,22 @@ end
 P.apply(out)
 local scr = G.new(out)
 local PW, PH, CW, CH = scr.PW, scr.PH, scr.CW, scr.CH
-
 local speaker = peripheral.find("speaker")
+local detector = peripheral.find("playerDetector")
+Prof.init(dir)
 
 ---------------------------------------------------------------------- sprites
 local spr = {}
 for name, rows in pairs(SPR) do spr[name] = G.compile(rows) end
+-- player shirt colour changes with prestige
+local PRESTIGE_SHIRT = { "U", "C", "g", "Y", "O", "R", "W", "A", "Z", "N", "Y" }
+local playerSpr = {}
+for i, letter in ipairs(PRESTIGE_SHIRT) do
+  local rows = {}
+  for r, row in ipairs(SPR.player) do rows[r] = row:gsub("U", letter) end
+  playerSpr[i - 1] = G.compile(rows)
+end
+local BLACK = G.pattern({ S.K, S.K, S.K, S.K, S.K, S.K })
 
 ---------------------------------------------------------------------- definitions
 local WEAPONS = {
@@ -69,24 +81,7 @@ local MOBS = {
 }
 local SPAWN_ORDER = { "zombie", "ghoul", "brute", "skeleton", "bomb_imp" }
 local DEATH_COL = { zombie = S.Z, ghoul = S.A, brute = S.Z, skeleton = S.W, bomb_imp = S.R, boss = S.W }
-
----------------------------------------------------------------------- save
-local save = { best = 0, bestTime = 0, runs = 0 }
-local function loadSave()
-  if fs.exists(SAVE_FILE) then
-    local f = fs.open(SAVE_FILE, "r")
-    local ok, t = pcall(textutils.unserialize, f.readAll())
-    f.close()
-    if ok and type(t) == "table" then
-      for k, v in pairs(t) do save[k] = v end
-    end
-  end
-end
-local function writeSave()
-  local f = fs.open(SAVE_FILE, "w")
-  f.write(textutils.serialize(save))
-  f.close()
-end
+local SPELLS = { "firering", "meteor", "frost", "thunder", "orbs" }
 
 ---------------------------------------------------------------------- sound
 local frame = 0
@@ -101,6 +96,11 @@ local SOUNDS = {
   hurt  = { 6,  function() speaker.playSound("entity.player.hurt", 0.8, 1) end },
   boss  = { 40, function() speaker.playSound("entity.wither.spawn", 0.4, 1) end },
   pick  = { 4,  function() speaker.playNote("bell", 0.6, 18) end },
+  zap   = { 3,  function() speaker.playNote("bit", 0.4, 20) end },
+  frost = { 10, function() speaker.playSound("block.glass.break", 0.5, 1.4) end },
+  shield = { 8, function() speaker.playNote("iron_xylophone", 0.6, 20) end },
+  buy   = { 2,  function() speaker.playNote("pling", 0.7, 16) end },
+  login = { 5,  function() speaker.playSound("entity.player.levelup", 0.5, 1.5) end },
 }
 local function sfx(kind)
   if not speaker then return end
@@ -110,27 +110,24 @@ local function sfx(kind)
   pcall(d[2])
 end
 
----------------------------------------------------------------------- run state
+---------------------------------------------------------------------- state
+-- everything about the current run lives in R, the logged-in player in prof
 local state = "title"
 local running = true
 local held = {}
+local prof = Prof.load("Guest")
 local world
-local p, mobs, bullets, eshots, gems, pickups, parts, beams
-local tick, kills, score
-local owned, stats
-local spawnTimer, nextHorde, nextBoss, boss, announced
-local offers, offerTitle, rerolls
-local msg, msgCol, msgTimer = "", S.Y, 0
-local shake = 0
-local deadTimer, newBest = 0, false
+local p, R, stats, owned
+local mobs, bullets, eshots, gems, pickups, parts, beams, strikes, fires, orbs
+local UI = { msg = "", msgCol = S.Y, msgTimer = 0, shake = 0, treeSel = "root", prestigeArm = 0, nameBuf = "", board = {} }
 local grid = {}
 
-local function secs() return tick / TPS end
-local function hpMul(s) return 1 + 0.25 * (s / 60) ^ 1.4 end
-local function speedMul(s) return 1 + min(0.45, s / 800) end
+local function secs() return R.tick / TPS end
+local function hpMul(s) return (1 + 0.25 * (s / 60) ^ 1.4) * Tree.prestigeMobHp(prof.prestige) end
+local function speedMul(s) return (1 + min(0.45, s / 800)) * Tree.prestigeMobSpeed(prof.prestige) end
 local function dmgAdd(s) return floor(s / 240) end
 local function xpFor(l) return floor(5 + l * 4 + l ^ 1.8) end
-local function say(t, ticks, col) msg, msgTimer, msgCol = t, ticks or 60, col or S.Y end
+local function say(t, ticks, col) UI.msg, UI.msgTimer, UI.msgCol = t, ticks or 60, col or S.Y end
 
 local function removeAt(list, i)
   local n = #list
@@ -139,35 +136,75 @@ local function removeAt(list, i)
 end
 
 local function recompute()
-  stats = I.compute(owned)
+  stats = I.compute(owned, Tree.mods(prof.tree, prof.prestige))
   local newMax = max(1, floor(stats.maxhp + 0.5))
   p.maxHp = newMax
   if p.hp > newMax then p.hp = newMax end
 end
 
+local function login(name)
+  if prof and prof.name == Prof.clean(name) then return end
+  prof = Prof.load(name)
+  UI.board = Prof.leaderboard(10)
+  UI.treeSel = "root"
+  say("Welcome, " .. prof.name .. "!", 60, S.g)
+  sfx("login")
+end
+
+---------------------------------------------------------------------- run setup
+local function giveItem(id)
+  local it = I.byId[id]
+  if not it then return end
+  owned[id] = (owned[id] or 0) + 1
+  if it.weapon then p.unlocked[it.weapon] = true end
+end
+
 local function newRun()
   world = World.new(spr, random(1, 99999))
   p = {
-    x = 0, y = 0, vx = 0, vy = 0, fx = 1, fy = 0, flip = false,
+    x = 0, y = 0, vx = 0, vy = 0, knx = 0, kny = 0, fx = 1, fy = 0, flip = false,
     hp = 10, maxHp = 10, cd = 0, iframes = 0,
-    xp = 0, level = 1, xpNext = xpFor(1), pending = 0,
+    xp = 0, level = 1, xpNext = xpFor(1), pending = 0, bonus = 0,
     weapon = 1, unlocked = { true, false, false, false },
-    knx = 0, kny = 0, regenT = 0, drainT = 0, sawA = 0, auraT = 0, auraFlash = 0, moving = false,
+    regenT = 0, drainT = 0, sawA = 0, auraT = 0, auraFlash = 0, moving = false,
+    shieldT = 0, retalT = 0, revUsed = 0, thornT = 0,
+  }
+  R = {
+    tick = 0, kills = 0, score = 0, bossKills = 0,
+    spawnTimer = 20, nextHorde = 60 * TPS, nextBoss = 180 * TPS, boss = nil,
+    announced = { zombie = true }, rerolls = 0, banishes = 0, banned = {},
+    offers = nil, offerKind = nil, banishMode = false,
+    deadTimer = 0, newBest = false, soulsEarned = 0, mult = 1,
+    spell = { meteor = 0, frost = 0, thunder = 0, orbs = 0, mortar = 0, ring = 0, fire = 0 },
   }
   owned = {}
+  mobs, bullets, eshots, gems, pickups, parts, beams, strikes, fires, orbs = {}, {}, {}, {}, {}, {}, {}, {}, {}, {}
+  recompute()
+
+  -- keystone start perks
+  for _, s in ipairs(Tree.starts(prof.tree)) do
+    if s == "weapon" then
+      local w = I.randomOf(owned, "rare", function(it) return it.weapon ~= nil end)
+      if w then giveItem(w.id) end
+    elseif s == "rare" then
+      local it = I.randomOf(owned, "rare", function(it) return not it.weapon end)
+      if it then giveItem(it.id) end
+    elseif s == "spell" then
+      giveItem(SPELLS[random(#SPELLS)])
+    else
+      giveItem(s)
+    end
+  end
   recompute()
   p.hp = p.maxHp
-  mobs, bullets, eshots, gems, pickups, parts, beams = {}, {}, {}, {}, {}, {}, {}
-  tick, kills, score = 0, 0, 0
-  spawnTimer, nextHorde, nextBoss, boss = 20, 60 * TPS, 180 * TPS, nil
-  announced = { zombie = true }
-  rerolls = 3
-  shake = 0
-  newBest = false
+  R.rerolls = floor(stats.rerolls + 0.5)
+  R.banishes = floor(stats.banish + 0.5)
+  p.bonus = floor(stats.headstart + 0.5)
+  UI.shake = 0
   say("Survive!  WASD move, SPACE shoot", 80, S.W)
 end
 
----------------------------------------------------------------------- particles / fx
+---------------------------------------------------------------------- particles
 local function addPart(x, y, vx, vy, life, col)
   if #parts < 350 then parts[#parts + 1] = { x = x, y = y, vx = vx, vy = vy, life = life, col = col } end
 end
@@ -180,7 +217,14 @@ local function burst(x, y, n, col, spd)
   end
 end
 
----------------------------------------------------------------------- spatial grid (16 px cells)
+local function ring(x, y, rad, n, col, spd)
+  for i = 1, n do
+    local a = i / n * 2 * pi
+    addPart(x + cos(a) * rad * 0.3, y + sin(a) * rad * 0.3, cos(a) * spd, sin(a) * spd, floor(rad / spd * 0.7) + 2, col)
+  end
+end
+
+---------------------------------------------------------------------- spatial grid (16 px cells, keyed by feet position)
 local function gkey(gx, gy) return gx * 100003 + gy end
 
 local function buildGrid()
@@ -195,7 +239,6 @@ local function buildGrid()
   end
 end
 
--- call fn(m) for live mobs whose cell is within `cells` of (x, y)
 local function forNear(x, y, cells, fn)
   local gx, gy = floor(x / 16), floor(y / 16)
   for yy = gy - cells, gy + cells do
@@ -204,42 +247,72 @@ local function forNear(x, y, cells, fn)
       if l then
         for i = 1, #l do
           local m = l[i]
-          if not m.dead then
-            if fn(m) then return end
-          end
+          if not m.dead and fn(m) then return end
         end
       end
     end
   end
 end
 
----------------------------------------------------------------------- combat
-local gameOver, killMob, explode
-
-local function hurtPlayer(dmg)
-  if p.iframes > 0 or state ~= "play" then return end
-  if random() < stats.dodge then
-    p.iframes = 8
-    addPart(p.x, p.y - 16, 0, -0.5, 10, S.C)
-    return
+local function nearestMob(x, y, maxD, exclude)
+  local best, bd = nil, maxD * maxD
+  for _, m in ipairs(mobs) do
+    if not m.dead and not (exclude and exclude[m]) then
+      local dx, dy = m.x - x, (m.y - 6) - y
+      local d = dx * dx + dy * dy
+      if d < bd then best, bd = m, d end
+    end
   end
-  dmg = dmg * (1 - min(0.6, stats.armor * 0.15))
-  p.hp = p.hp - dmg
-  p.iframes = 18
-  if dmg >= 2 then shake = max(shake, 2) end
-  burst(p.x, p.y - 7, 6, S.R, 1.2)
-  sfx("hurt")
-  if p.hp <= 0 then
-    p.hp = 0
-    gameOver()
-  end
+  return best
 end
 
-local function damageMob(m, dmg, kx, ky)
+-- a random live mob within maxD of the player (optionally preferring crowds)
+local function pickTarget(maxD, crowd)
+  local cands = {}
+  for _, m in ipairs(mobs) do
+    if not m.dead then
+      local dx, dy = m.x - p.x, m.y - p.y
+      if dx * dx + dy * dy < maxD * maxD then cands[#cands + 1] = m end
+    end
+  end
+  if #cands == 0 then return nil end
+  if not crowd then return cands[random(#cands)] end
+  local best, bestN = nil, -1
+  for _ = 1, min(6, #cands) do
+    local m = cands[random(#cands)]
+    local n = 0
+    forNear(m.x, m.y, 1, function(o)
+      local dx, dy = o.x - m.x, o.y - m.y
+      if dx * dx + dy * dy < 900 then n = n + 1 end
+    end)
+    if n > bestN then best, bestN = m, n end
+  end
+  return best
+end
+
+---------------------------------------------------------------------- combat core
+local C = {}   -- combat functions (kept in a table to stay under Lua's local limit)
+
+-- multiplier applied to everything the player deals
+function C.runMult()
+  local m = stats.dmg
+  if stats.bloodpact > 0 then m = m * (1 + stats.bloodpact * (p.maxHp - p.hp)) end
+  if p.retalT > 0 then m = m * (1 + stats.retal) end
+  if stats.bulwark > 0 then m = m * (1 + stats.bulwark * p.maxHp) end
+  return m
+end
+
+function C.damageMob(m, dmg, kx, ky, raw)
   if m.dead then return end
+  if not raw then
+    dmg = dmg * R.mult
+    if (m.shockT or 0) > 0 then dmg = dmg * (1.25 + stats.conductor) end
+    if (m.burnT or 0) > 0 and stats.pyro > 0 then dmg = dmg * (1 + stats.pyro) end
+    if ((m.frozenT or 0) > 0 or (m.chillT or 0) > 0) and stats.permafrost > 0 then dmg = dmg * (1 + stats.permafrost) end
+    if stats.lifesteal > 0 then p.hp = min(p.maxHp, p.hp + dmg * stats.lifesteal) end
+  end
   m.hp = m.hp - dmg
   m.flash = 2
-  if stats.lifesteal > 0 then p.hp = min(p.maxHp, p.hp + dmg * stats.lifesteal) end
   if kx and not m.def.heavy then
     local l = sqrt(kx * kx + ky * ky)
     if l > 0 then
@@ -247,35 +320,119 @@ local function damageMob(m, dmg, kx, ky)
       m.y = m.y + ky / l * 2.5
     end
   end
-  if m.hp <= 0 then killMob(m) end
+  if m.hp <= 0 then C.killMob(m) end
 end
 
-explode = function(x, y, rad, dmg, hurtsPlayer, fromPlayer)
-  if fromPlayer then
+function C.burn(m, power)
+  m.burnT = 60
+  m.burnP = max(m.burnP or 0, power * stats.burn)
+end
+
+-- o: { player = true, hurts = true, depth = n, small = true, fire = true, raw = true }
+function C.explode(x, y, rad, dmg, o)
+  o = o or {}
+  if o.player then
     rad = rad * stats.area
-    dmg = dmg * stats.boom
+    dmg = dmg * stats.aoedmg * stats.boom
   end
+  local r2pad = rad
   for _, m in ipairs(mobs) do
     if not m.dead then
       local dx, dy = m.x - x, (m.y - 6) - y
-      if dx * dx + dy * dy <= (rad + m.def.r) ^ 2 then damageMob(m, dmg) end
+      local rr = r2pad + m.def.r
+      if dx * dx + dy * dy <= rr * rr then
+        if dmg > 0 then C.damageMob(m, dmg, nil, nil, not o.player) end
+        if o.fire and not m.dead then C.burn(m, dmg * 0.15) end
+      end
     end
   end
-  if hurtsPlayer then
+  if o.hurts then
     local dx, dy = p.x - x, (p.y - 6) - y
-    if dx * dx + dy * dy <= rad * rad then hurtPlayer(3 + dmgAdd(secs())) end
+    if dx * dx + dy * dy <= rad * rad then C.hurtPlayer(3 + dmgAdd(secs())) end
   end
   local cols = { S.O, S.Y, S.R, S.W }
-  for _ = 1, floor(10 + rad) do
+  local n = o.small and 5 or floor(10 + rad)
+  for _ = 1, n do
     local a = random() * 2 * pi
     local v = rad / 7 * (0.5 + random())
     addPart(x, y, cos(a) * v, sin(a) * v, random(4, 9), cols[random(4)])
   end
-  shake = max(shake, 4)
+  if not o.small then UI.shake = max(UI.shake, 3) end
   sfx("boom")
+
+  if o.player and not o.small then
+    -- napalm: burning ground
+    if stats.napalm > 0 and #fires < 14 then
+      fires[#fires + 1] = { x = x, y = y, r = rad * 0.8, t = 60, dmg = 2 * stats.napalm }
+    end
+    -- shrapnel
+    local n2 = floor(stats.shrapnel + 0.5)
+    for i = 1, n2 do
+      local a = i / n2 * 2 * pi + random() * 0.4
+      bullets[#bullets + 1] = { x = x, y = y, vx = cos(a) * 5, vy = sin(a) * 5, life = 9, dmg = dmg * 0.3,
+        pierce = 0, ric = 0, hit = {}, col = S.O, frag = true }
+    end
+    -- chain reaction
+    local depth = o.depth or 0
+    if stats.chainreact > 0 and depth < 3 and random() < stats.chainreact then
+      local t = nearestMob(x + random(-40, 40), y + random(-30, 30), 70)
+      if t then
+        strikes[#strikes + 1] = { x = t.x, y = t.y - 6, t = 6, rad = rad / stats.area, dmg = dmg / (stats.aoedmg * stats.boom),
+          depth = depth + 1, kind = "chain" }
+      end
+    end
+  end
 end
 
-local function dropGem(x, y, v)
+function C.thornBlast(mult)
+  local power = stats.thorns * (8 + 12 * stats.armor) * mult
+  if power <= 0 then return end
+  C.explode(p.x, p.y - 6, 30, power, { player = true, small = true })
+  ring(p.x, p.y - 6, 30, 18, S.A, 2.5)
+end
+
+function C.hurtPlayer(dmg)
+  if p.iframes > 0 or state ~= "play" then return end
+  -- energy shield
+  if stats.shield >= 1 and p.shieldT >= C.shieldCd() then
+    p.shieldT = 0
+    p.iframes = 10
+    ring(p.x, p.y - 6, 12, 14, S.C, 1.5)
+    sfx("shield")
+    return
+  end
+  if random() < stats.dodge then
+    p.iframes = 8
+    addPart(p.x, p.y - 16, 0, -0.5, 10, S.C)
+    return
+  end
+  dmg = dmg * (1 - I.armorReduction(stats.armor))
+  p.hp = p.hp - dmg
+  p.iframes = floor(18 * stats.iframes)
+  if stats.retal > 0 then p.retalT = 60 end
+  if dmg >= 2 then UI.shake = max(UI.shake, 2) end
+  burst(p.x, p.y - 7, 6, S.R, 1.2)
+  sfx("hurt")
+  if stats.thorns > 0 then C.thornBlast(1) end
+  if p.hp <= 0 then
+    if p.revUsed < floor(stats.revive + 0.5) then
+      p.revUsed = p.revUsed + 1
+      p.hp = p.maxHp * 0.5
+      p.iframes = 50
+      C.explode(p.x, p.y - 6, 60, 0, { player = true })
+      say("SECOND WIND!", 60, S.Y)
+    else
+      p.hp = 0
+      C.gameOver()
+    end
+  end
+end
+
+function C.shieldCd()
+  return floor(240 / (1 + 0.5 * (floor(stats.shield + 0.5) - 1)))
+end
+
+function C.dropGem(x, y, v)
   if #gems >= 220 then
     local g = gems[random(#gems)]
     g.v = g.v + v
@@ -284,53 +441,56 @@ local function dropGem(x, y, v)
   gems[#gems + 1] = { x = x + random(-2, 2), y = y + random(-2, 2), v = v }
 end
 
-killMob = function(m)
+function C.killMob(m)
   if m.dead then return end
   m.dead = true
-  kills = kills + 1
-  score = score + m.def.score
-  dropGem(m.x, m.y - 4, m.def.xp * (1 + secs() / 240))
+  R.kills = R.kills + 1
+  R.score = R.score + m.def.score
+  C.dropGem(m.x, m.y - 4, m.def.xp * (1 + secs() / 240))
   burst(m.x, m.y - 6, 8, DEATH_COL[m.kind] or S.R, 1.4)
   burst(m.x, m.y - 6, 4, S.R, 0.8)
   sfx("kill")
   if m.def.boss then
-    pickups[#pickups + 1] = { x = m.x, y = m.y, kind = "chest", ttl = 9999 }
+    R.bossKills = R.bossKills + 1
+    for i = 1, floor(stats.bosschests + 0.5) do
+      pickups[#pickups + 1] = { x = m.x + (i - 1) * 14, y = m.y, kind = "chest", ttl = 99999 }
+    end
     for _ = 1, 3 do
       pickups[#pickups + 1] = { x = m.x + random(-14, 14), y = m.y + random(-10, 10), kind = "heart", ttl = 60 * TPS }
     end
     say("BOSS DOWN!  Grab the chest", 90, S.Y)
-    boss = nil
-    explode(m.x, m.y - 10, 30, 0, false, false)
+    R.boss = nil
+    C.explode(m.x, m.y - 10, 30, 0, {})
   else
     local r = random()
-    if r < 0.025 then
+    if r < 0.025 * stats.drops then
       pickups[#pickups + 1] = { x = m.x, y = m.y, kind = "heart", ttl = 30 * TPS }
-    elseif r < 0.032 then
+    elseif r < 0.032 * stats.drops then
       pickups[#pickups + 1] = { x = m.x, y = m.y, kind = "magnet", ttl = 30 * TPS }
     end
   end
   if m.def.bomb and not m.exploded then
     m.exploded = true
-    explode(m.x, m.y - 6, 26, 10 * hpMul(secs()), false, false)
+    C.explode(m.x, m.y - 6, 26, 10 * hpMul(secs()), {})
   elseif stats.corpse > 0 and random() < stats.corpse then
-    explode(m.x, m.y - 6, 18, m.maxHp * 0.6, false, true)
+    C.explode(m.x, m.y - 6, 18, m.maxHp * 0.6, { player = true })
   end
 end
 
-local function spawnMob(kind, x, y)
+function C.spawnMob(kind, x, y)
   local d = MOBS[kind]
   local s = secs()
   local m = {
     kind = kind, def = d, x = x, y = y,
     hp = d.hp * hpMul(s), speed = d.speed * speedMul(s) * (0.9 + random() * 0.2),
-    flash = 0, cd = random(30, 70), phase = random(0, 11), fuse = nil, flip = false,
+    flash = 0, cd = random(30, 70), phase = random(0, 11), flip = false,
   }
   m.maxHp = m.hp
   mobs[#mobs + 1] = m
   return m
 end
 
-local function spawnPos()
+function C.spawnPos()
   local hx, hy = PW / 2 + 18, PH / 2 + 22
   for _ = 1, 8 do
     local a = random() * 2 * pi
@@ -342,7 +502,7 @@ local function spawnPos()
   end
 end
 
-local function pickType(s)
+function C.pickType(s)
   local opts, total = {}, 0
   for _, kind in ipairs(SPAWN_ORDER) do
     local u = MOBS[kind].unlock
@@ -361,7 +521,7 @@ local function pickType(s)
 end
 
 ---------------------------------------------------------------------- shooting
-local function fire()
+function C.fire()
   local w = WEAPONS[p.weapon]
   local proj = w.proj + floor(stats.proj + 0.5)
   local baseA = atan2(p.fy, p.fx)
@@ -383,7 +543,7 @@ local function fire()
   if bestA then baseA = bestA end
 
   local fan = w.fan * (1 + (proj - w.proj) * 0.2)
-  local dmg = w.dmg * stats.dmg
+  local dmg = w.dmg * stats.gundmg
   for i = 1, proj do
     local a = baseA + (random() - 0.5) * w.jitter
     if proj > 1 then a = a - fan / 2 + fan * (i - 1) / (proj - 1) end
@@ -391,7 +551,7 @@ local function fire()
     bullets[#bullets + 1] = {
       x = ox + ca * 6, y = oy + sa * 6, vx = ca * w.speed, vy = sa * w.speed,
       life = floor(range / w.speed), dmg = dmg, pierce = floor(stats.pierce + 0.5),
-      ric = floor(stats.ricochet + 0.5), hit = {}, col = w.col, aoe = w.aoe,
+      ric = floor(stats.ricochet + 0.5), hit = {}, col = w.col, aoe = w.aoe, aoeBase = w.dmg,
     }
   end
   addPart(ox + p.fx * 8, oy + p.fy * 8, 0, 0, 2, S.Y)
@@ -399,30 +559,21 @@ local function fire()
   sfx("shoot")
 end
 
-local function nearestMob(x, y, maxD, exclude)
-  local best, bd = nil, maxD * maxD
-  for _, m in ipairs(mobs) do
-    if not m.dead and not exclude[m] then
-      local dx, dy = m.x - x, (m.y - 6) - y
-      local d = dx * dx + dy * dy
-      if d < bd then best, bd = m, d end
-    end
-  end
-  return best
-end
-
-local function bulletHit(b, m)
+function C.bulletHit(b, m)
   b.hit[m] = true
   local dmg = b.dmg
-  -- blood pact: bonus per missing HP
-  if stats.bloodpact > 0 then dmg = dmg * (1 + stats.bloodpact * (p.maxHp - p.hp)) end
-  local crit = random() < stats.crit
-  if crit then
+  if random() < stats.crit then
     dmg = dmg * stats.critdmg
     addPart(m.x, m.y - 14, 0, -0.6, 6, S.Y)
   end
-  damageMob(m, dmg, b.vx, b.vy)
+  C.damageMob(m, dmg, b.vx, b.vy)
   sfx("hit")
+  if b.frag then return end
+
+  -- explosive rounds
+  if stats.exround > 0 and not b.aoe then
+    C.explode(b.x, b.y, 10, b.dmg / stats.gundmg * 0.35 * stats.exround, { player = true, small = true })
+  end
 
   -- storm coil: chain lightning
   if stats.chain > 0 and random() < stats.chain then
@@ -432,25 +583,26 @@ local function bulletHit(b, m)
       if not t then break end
       zapped[t] = true
       beams[#beams + 1] = { from.x, from.y - 6, t.x, t.y - 6, 3 }
-      damageMob(t, dmg * 0.6)
+      if stats.conductor > 0 then t.shockT = 40 end
+      C.damageMob(t, dmg * 0.6)
       from = t
     end
+    sfx("zap")
   end
 
-  -- splitter: two smaller bullets fly off sideways
+  -- splitter
   if stats.split >= 1 and not b.isSplit then
     local a = atan2(b.vy, b.vx)
     local spd = sqrt(b.vx * b.vx + b.vy * b.vy)
     for k = 1, floor(stats.split + 0.5) * 2 do
       local na = a + ((k % 2 == 0) and 0.6 or -0.6) * (1 + floor((k - 1) / 2) * 0.5)
-      local nb = { x = b.x, y = b.y, vx = cos(na) * spd, vy = sin(na) * spd, life = 12, dmg = b.dmg * 0.5,
-                   pierce = 0, ric = 0, hit = { [m] = true }, col = b.col, isSplit = true }
-      bullets[#bullets + 1] = nb
+      bullets[#bullets + 1] = { x = b.x, y = b.y, vx = cos(na) * spd, vy = sin(na) * spd, life = 12, dmg = b.dmg * 0.5,
+        pierce = 0, ric = 0, hit = { [m] = true }, col = b.col, isSplit = true }
     end
   end
 end
 
-local function updateBullets()
+function C.updateBullets()
   for i = #bullets, 1, -1 do
     local b = bullets[i]
     local dead = false
@@ -467,8 +619,8 @@ local function updateBullets()
         end
       end)
       if target then
-        bulletHit(b, target)
-        if b.aoe then explode(b.x, b.y, b.aoe, b.dmg, false, true); dead = true; break end
+        C.bulletHit(b, target)
+        if b.aoe then C.explode(b.x, b.y, b.aoe, b.aoeBase, { player = true }); dead = true; break end
         if b.ric > 0 then
           b.ric = b.ric - 1
           local t = nearestMob(b.x, b.y, 90, b.hit)
@@ -488,7 +640,7 @@ local function updateBullets()
     b.life = b.life - 1
     if b.life <= 0 and not dead then
       dead = true
-      if b.aoe then explode(b.x, b.y, b.aoe, b.dmg, false, true) end
+      if b.aoe then C.explode(b.x, b.y, b.aoe, b.aoeBase, { player = true }) end
     end
     if b.aoe and not dead and frame % 2 == 0 then addPart(b.x, b.y, 0, 0, 4, S.D) end
     if dead then removeAt(bullets, i) end
@@ -496,7 +648,7 @@ local function updateBullets()
 end
 
 ---------------------------------------------------------------------- update: player
-local function updatePlayer()
+function C.updatePlayer()
   local ix, iy, ax, ay = 0, 0, 0, 0
   if held[keys.a] then ix = ix - 1 end
   if held[keys.d] then ix = ix + 1 end
@@ -531,10 +683,11 @@ local function updatePlayer()
   if p.fx < -0.1 then p.flip = true elseif p.fx > 0.1 then p.flip = false end
 
   if p.cd > 0 then p.cd = p.cd - 1 end
-  if shooting and p.cd <= 0 and #bullets < 300 then fire() end
+  if shooting and p.cd <= 0 and #bullets < 300 then C.fire() end
   if p.iframes > 0 then p.iframes = p.iframes - 1 end
+  if p.retalT > 0 then p.retalT = p.retalT - 1 end
+  if stats.shield >= 1 and p.shieldT < C.shieldCd() then p.shieldT = p.shieldT + 1 end
 
-  -- regen / drain
   if stats.regen > 0.01 and p.hp < p.maxHp then
     p.regenT = p.regenT + stats.regen
     if p.regenT >= 200 then
@@ -553,7 +706,7 @@ local function updatePlayer()
 end
 
 ---------------------------------------------------------------------- update: mobs
-local function updateMobs()
+function C.updateMobs()
   local s = secs()
   for i = #mobs, 1, -1 do
     local m = mobs[i]
@@ -565,7 +718,7 @@ local function updateMobs()
       local dist = sqrt(dx * dx + dy * dy)
       if dist > 460 then
         if d.boss then
-          local x, y = spawnPos()
+          local x, y = C.spawnPos()
           if x then m.x, m.y = x, y end
         else
           removeAt(mobs, i)
@@ -578,9 +731,22 @@ local function updateMobs()
         m.flip = dx < 0
         local mv = m.speed
 
-        if d.ranged then
+        -- status effects
+        if m.burnT and m.burnT > 0 then
+          m.burnT = m.burnT - 1
+          if m.burnT % 10 == 0 then
+            C.damageMob(m, m.burnP)
+            addPart(m.x + random(-3, 3), m.y - 10, 0, -0.5, 5, (random() < 0.5) and S.O or S.R)
+          end
+          if m.burnT <= 0 then m.burnP = 0 end
+        end
+        if m.shockT and m.shockT > 0 then m.shockT = m.shockT - 1 end
+        if m.chillT and m.chillT > 0 then m.chillT = m.chillT - 1; mv = mv * 0.5 end
+        if m.frozenT and m.frozenT > 0 then m.frozenT = m.frozenT - 1; mv = 0 end
+
+        if d.ranged and not m.dead then
           if dist < 50 then mv = -mv * 0.6 elseif dist < 80 then mv = 0 end
-          if dist < 115 and m.cd <= 0 then
+          if dist < 115 and m.cd <= 0 and (m.frozenT or 0) <= 0 then
             m.cd = random(50, 80)
             local sx, sy = m.x, m.y - 8
             local tx, ty = p.x - sx, p.y - 7 - sy
@@ -589,15 +755,15 @@ local function updateMobs()
           end
         end
 
-        if d.bomb then
+        if d.bomb and not m.dead then
           if m.fuse then
             m.fuse = m.fuse - 1
             mv = mv * 0.3
             if m.fuse <= 0 then
               m.exploded = true
-              explode(m.x, m.y - 6, 28, 10 * hpMul(s), true, false)
+              C.explode(m.x, m.y - 6, 28, 10 * hpMul(s), { hurts = true })
               m.fuse = nil
-              killMob(m)
+              C.killMob(m)
             end
           elseif dist < 18 then
             m.fuse = 16
@@ -606,20 +772,20 @@ local function updateMobs()
 
         if d.boss and m.cd <= 0 then
           m.cd = 100
-          for _ = 1, 3 do spawnMob("zombie", m.x + random(-20, 20), m.y + random(-14, 14)) end
+          for _ = 1, 3 do C.spawnMob("zombie", m.x + random(-20, 20), m.y + random(-14, 14)) end
         end
 
         if m.stun and m.stun > 0 then
           m.stun = m.stun - 1
           mv = 0
         end
+
         if not m.dead then
           m.x = m.x + nx * mv
           m.y = m.y + ny * mv
           if not d.boss then m.x, m.y = world.pushOut(m.x, m.y, 3) end
           m.moving = mv ~= 0
 
-          -- separation from neighbours
           local r = d.r
           forNear(m.x, m.y, 1, function(o)
             if o ~= m then
@@ -638,16 +804,15 @@ local function updateMobs()
             end
           end)
 
-          -- contact damage
           if m.atk and m.atk > 0 then m.atk = m.atk - 1 end
-          if not d.bomb and dist < r + 5 and (m.atk or 0) <= 0 then
-            local hpBefore = p.hp
-            hurtPlayer(d.dmg + dmgAdd(s))
-            if p.hp < hpBefore then
+          if not d.bomb and dist < r + 5 and (m.atk or 0) <= 0 and (m.frozenT or 0) <= 0 then
+            local before = p.hp
+            C.hurtPlayer(d.dmg + dmgAdd(s))
+            if p.hp < before then
               m.atk = d.heavy and 40 or 20
               if d.heavy then
-                m.stun = 25                      -- brute winds down after a hit: your window to escape
-                p.knx, p.kny = -nx * 4, -ny * 4  -- smooth shove, you keep control
+                m.stun = 25
+                p.knx, p.kny = -nx * 4, -ny * 4
               end
             end
           end
@@ -657,14 +822,14 @@ local function updateMobs()
   end
 end
 
-local function updateEShots()
+function C.updateEShots()
   for i = #eshots, 1, -1 do
     local e = eshots[i]
     e.x, e.y = e.x + e.vx, e.y + e.vy
     e.life = e.life - 1
     local dx, dy = p.x - e.x, (p.y - 7) - e.y
     if dx * dx + dy * dy < 36 then
-      hurtPlayer(e.dmg)
+      C.hurtPlayer(e.dmg)
       removeAt(eshots, i)
     elseif e.life <= 0 then
       removeAt(eshots, i)
@@ -672,8 +837,8 @@ local function updateEShots()
   end
 end
 
----------------------------------------------------------------------- update: passives
-local function sawPositions()
+---------------------------------------------------------------------- passives + spells
+function C.sawPositions()
   local list = {}
   local n = floor(stats.saws + 0.5)
   for i = 1, n do
@@ -683,16 +848,21 @@ local function sawPositions()
   return list
 end
 
-local function updatePassives()
+function C.fireRingRadius() return (16 + 6 * stats.firering) * stats.area end
+
+function C.updatePassives()
+  local sp = R.spell
+  local aoe = stats.aoedmg
+
   if stats.saws >= 1 then
     p.sawA = p.sawA + 0.18
-    for _, sp in ipairs(sawPositions()) do
-      forNear(sp[1], sp[2] + 6, 1, function(m)
-        local dx, dy = m.x - sp[1], (m.y - 6) - sp[2]
+    for _, s in ipairs(C.sawPositions()) do
+      forNear(s[1], s[2] + 6, 1, function(m)
+        local dx, dy = m.x - s[1], (m.y - 6) - s[2]
         local r = m.def.r + 3
         if dx * dx + dy * dy <= r * r and (m.sawCd or 0) <= frame then
           m.sawCd = frame + 8
-          damageMob(m, 5 * stats.dmg * stats.sawdmg, cos(sp[3]), sin(sp[3]))
+          C.damageMob(m, 5 * stats.sawdmg, cos(s[3]), sin(s[3]))
         end
       end)
     end
@@ -705,21 +875,178 @@ local function updatePassives()
       p.auraT = 0
       p.auraFlash = 3
       local rad = (20 + stats.aura * 8) * stats.area
-      local dmg = (2 + stats.aura * 1.5) * stats.dmg
+      local dmg = (2 + stats.aura * 1.5) * aoe
       for _, m in ipairs(mobs) do
         if not m.dead then
           local dx, dy = m.x - p.x, m.y - p.y
-          if dx * dx + dy * dy <= (rad + m.def.r) ^ 2 then damageMob(m, dmg) end
+          if dx * dx + dy * dy <= (rad + m.def.r) ^ 2 then C.damageMob(m, dmg) end
         end
       end
     end
   end
+
+  -- fire ring: constant burn around you
+  if stats.firering >= 1 then
+    sp.ring = sp.ring + 1
+    if sp.ring >= 6 then
+      sp.ring = 0
+      local rad = C.fireRingRadius()
+      local dmg = (1 + 0.6 * stats.firering) * aoe * stats.fireringdmg
+      for _, m in ipairs(mobs) do
+        if not m.dead then
+          local dx, dy = m.x - p.x, (m.y - 6) - (p.y - 6)
+          if dx * dx + dy * dy <= (rad + m.def.r) ^ 2 then
+            C.damageMob(m, dmg)
+            if not m.dead then C.burn(m, 0.5 * stats.firering * aoe) end
+          end
+        end
+      end
+    end
+  end
+
+  -- meteor: hits the biggest crowd
+  if stats.meteor >= 1 then
+    sp.meteor = sp.meteor + 1
+    if sp.meteor >= max(10, floor(80 * stats.cdr)) then
+      sp.meteor = 0
+      for _ = 1, floor(stats.meteor + 0.5) do
+        local t = pickTarget(170, true)
+        if t then
+          strikes[#strikes + 1] = { x = t.x + random(-6, 6), y = t.y - 6 + random(-4, 4), t = 20 + random(0, 8), rad = 26,
+            dmg = 18 * stats.meteordmg, kind = "meteor", fire = true }
+        end
+      end
+    end
+  end
+
+  -- frost nova
+  if stats.frost >= 1 then
+    sp.frost = sp.frost + 1
+    if sp.frost >= max(20, floor(120 * stats.cdr * stats.frostcd)) then
+      sp.frost = 0
+      local lvl = stats.frost
+      local rad = (40 + 10 * (lvl - 1)) * stats.area
+      local dmg = 5 * lvl * aoe
+      for _, m in ipairs(mobs) do
+        if not m.dead then
+          local dx, dy = m.x - p.x, m.y - p.y
+          if dx * dx + dy * dy <= (rad + m.def.r) ^ 2 then
+            m.frozenT = m.def.boss and 15 or 40
+            m.chillT = 100
+            C.damageMob(m, dmg)
+          end
+        end
+      end
+      ring(p.x, p.y - 6, rad, 36, S.C, rad / 8)
+      ring(p.x, p.y - 6, rad * 0.6, 20, S.W, rad / 12)
+      sfx("frost")
+    end
+  end
+
+  -- thunderstorm
+  if stats.thunder >= 1 then
+    sp.thunder = sp.thunder + 1
+    if sp.thunder >= max(4, floor(30 / stats.thunder * stats.cdr)) then
+      sp.thunder = 0
+      local t = pickTarget(170, false)
+      if t then
+        beams[#beams + 1] = { t.x + random(-20, 20), t.y - 120, t.x, t.y - 6, 3, bolt = true }
+        t.shockT = 40
+        C.damageMob(t, 12 * aoe)
+        burst(t.x, t.y - 6, 5, S.Y, 1.2)
+        sfx("zap")
+      end
+    end
+  end
+
+  -- arcane orbs
+  if stats.orbs >= 1 then
+    sp.orbs = sp.orbs + 1
+    if sp.orbs >= max(5, floor(20 * stats.cdr)) then
+      sp.orbs = 0
+      for k = 1, floor(stats.orbs + 0.5) do
+        local a = random() * 2 * pi
+        orbs[#orbs + 1] = { x = p.x + cos(a) * 6, y = p.y - 8 + sin(a) * 6, vx = cos(a) * 2, vy = sin(a) * 2, life = 70, dmg = 7 * aoe }
+      end
+    end
+  end
+
+  -- mortar
+  if stats.mortar >= 1 then
+    sp.mortar = sp.mortar + 1
+    if sp.mortar >= 40 then
+      sp.mortar = 0
+      for _ = 1, floor(stats.mortar + 0.5) do
+        local t = pickTarget(150, false)
+        if t then
+          strikes[#strikes + 1] = { x = t.x, y = t.y - 6, t = 15, rad = 20, dmg = 12, kind = "mortar" }
+        end
+      end
+    end
+  end
+
+  -- iron maiden: automatic thorns
+  if stats.thornpulse >= 1 then
+    p.thornT = p.thornT + 1
+    if p.thornT >= 40 then
+      p.thornT = 0
+      C.thornBlast(0.6)
+    end
+  end
 end
 
----------------------------------------------------------------------- update: pickups
-local openChest
+function C.updateSpellObjects()
+  -- falling strikes (meteor, mortar, chain reaction)
+  for i = #strikes, 1, -1 do
+    local s = strikes[i]
+    s.t = s.t - 1
+    if s.t <= 0 then
+      removeAt(strikes, i)
+      C.explode(s.x, s.y, s.rad, s.dmg, { player = true, depth = s.depth, fire = s.fire })
+    end
+  end
+  -- burning ground
+  for i = #fires, 1, -1 do
+    local f = fires[i]
+    f.t = f.t - 1
+    if f.t % 10 == 0 then
+      for _, m in ipairs(mobs) do
+        if not m.dead then
+          local dx, dy = m.x - f.x, (m.y - 6) - f.y
+          if dx * dx + dy * dy <= f.r * f.r then
+            C.damageMob(m, f.dmg * stats.aoedmg)
+            if not m.dead then C.burn(m, 0.4 * stats.aoedmg) end
+          end
+        end
+      end
+    end
+    if f.t <= 0 then removeAt(fires, i) end
+  end
+  -- homing orbs
+  for i = #orbs, 1, -1 do
+    local o = orbs[i]
+    if not o.target or o.target.dead or frame % 6 == 0 then o.target = nearestMob(o.x, o.y, 130) end
+    if o.target then
+      local dx, dy = o.target.x - o.x, (o.target.y - 6) - o.y
+      local d = sqrt(dx * dx + dy * dy)
+      if d > 0.1 then
+        o.vx = o.vx * 0.82 + dx / d * 0.9
+        o.vy = o.vy * 0.82 + dy / d * 0.9
+      end
+      if d < o.target.def.r + 2 then
+        C.damageMob(o.target, o.dmg)
+        burst(o.x, o.y, 3, S.C, 0.8)
+        o.life = 0
+      end
+    end
+    o.x, o.y = o.x + o.vx, o.y + o.vy
+    o.life = o.life - 1
+    if o.life <= 0 then removeAt(orbs, i) end
+  end
+end
 
-local function updatePickups()
+---------------------------------------------------------------------- update: pickups / spawns
+function C.updatePickups()
   local mag = stats.magnet
   for i = #gems, 1, -1 do
     local g = gems[i]
@@ -753,7 +1080,7 @@ local function updatePickups()
         say("MAGNET! All XP incoming", 40, S.C)
         sfx("pick")
       elseif it.kind == "chest" then
-        openChest()
+        C.startPick("chest")
       end
     elseif it.ttl <= 0 then
       removeAt(pickups, i)
@@ -768,51 +1095,50 @@ local function updatePickups()
   end
 end
 
----------------------------------------------------------------------- update: spawning
-local function updateSpawns()
+function C.updateSpawns()
   local s = secs()
   for _, kind in ipairs(SPAWN_ORDER) do
-    if not announced[kind] and s >= MOBS[kind].unlock then
-      announced[kind] = true
+    if not R.announced[kind] and s >= MOBS[kind].unlock then
+      R.announced[kind] = true
       say(MOBS[kind].intro, 80, S.O)
     end
   end
 
-  spawnTimer = spawnTimer - 1
-  if spawnTimer <= 0 then
-    spawnTimer = max(5, floor((34 - s / 10) / stats.spawn))
+  R.spawnTimer = R.spawnTimer - 1
+  if R.spawnTimer <= 0 then
+    R.spawnTimer = max(5, floor((34 - s / 10) / stats.spawn))
     local batch = 1 + floor(s / 90)
     for _ = 1, batch do
       if #mobs < MAX_MOBS then
-        local x, y = spawnPos()
-        if x then spawnMob(pickType(s), x, y) end
+        local x, y = C.spawnPos()
+        if x then C.spawnMob(C.pickType(s), x, y) end
       end
     end
   end
 
-  if tick >= nextHorde then
-    nextHorde = nextHorde + 60 * TPS
+  if R.tick >= R.nextHorde then
+    R.nextHorde = R.nextHorde + 60 * TPS
     say("A HORDE APPROACHES!", 70, S.R)
     for _ = 1, 16 + floor(s / 30) * 2 do
       if #mobs < MAX_MOBS + 40 then
-        local x, y = spawnPos()
-        if x then spawnMob((s >= 40 and random() < 0.35) and "ghoul" or "zombie", x, y) end
+        local x, y = C.spawnPos()
+        if x then C.spawnMob((s >= 40 and random() < 0.35) and "ghoul" or "zombie", x, y) end
       end
     end
   end
 
-  if tick >= nextBoss then
-    nextBoss = nextBoss + 180 * TPS
-    local x, y = spawnPos()
+  if R.tick >= R.nextBoss then
+    R.nextBoss = R.nextBoss + 180 * TPS
+    local x, y = C.spawnPos()
     if x then
-      boss = spawnMob("boss", x, y)
+      R.boss = C.spawnMob("boss", x, y)
       say("!!! THE GRAVE KING RISES !!!", 100, S.R)
       sfx("boss")
     end
   end
 end
 
-local function updateFx()
+function C.updateFx()
   for i = #parts, 1, -1 do
     local q = parts[i]
     q.x, q.y = q.x + q.vx, q.y + q.vy
@@ -825,68 +1151,145 @@ local function updateFx()
     b[5] = b[5] - 1
     if b[5] <= 0 then removeAt(beams, i) end
   end
-  if shake > 0 then shake = shake - 1 end
-  if msgTimer > 0 then msgTimer = msgTimer - 1 end
+  if UI.shake > 0 then UI.shake = UI.shake - 1 end
+  if UI.msgTimer > 0 then UI.msgTimer = UI.msgTimer - 1 end
 end
 
----------------------------------------------------------------------- level-up / chest
-local function startPick(title, minRarity)
-  offers = I.roll(owned, stats.luck, 3, minRarity)
-  offerTitle = title
+---------------------------------------------------------------------- level-up / chest / death
+function C.offerCount() return max(3, min(4, floor(stats.choices + 0.5))) end
+
+function C.startPick(kind)
+  R.offerKind = kind
+  R.banishMode = false
+  R.offers = I.roll(owned, stats.luck, C.offerCount(), kind == "chest" and "epic" or nil, R.banned)
   state = "pick"
   sfx("level")
 end
 
-openChest = function()
-  p.chests = (p.chests or 0) + 1
-  startPick("TREASURE!  Pick a reward", "epic")
+function C.pickTitle()
+  if R.offerKind == "chest" then return "TREASURE!  Pick a reward" end
+  if R.offerKind == "bonus" then return "HEAD START  -  free pick" end
+  return "LEVEL UP!  Level " .. (p.level - p.pending + 1)
 end
 
-local function choose(i)
-  local it = offers and offers[i]
-  if not it then return end
-  owned[it.id] = (owned[it.id] or 0) + 1
-  if it.weapon then
-    p.unlocked[it.weapon] = true
-    p.weapon = it.weapon
-  end
-  recompute()
-  if it.heal then p.hp = min(p.maxHp, p.hp + it.heal) end
-  say(it.name .. "!", 40, P.slot[I.RARITY[it.rarity].col])
-  if offerTitle:sub(1, 5) == "LEVEL" then p.pending = p.pending - 1 end
-  if p.pending > 0 then
-    startPick("LEVEL UP!  Level " .. (p.level - p.pending + 1))
+function C.nextPickOrPlay()
+  if p.bonus > 0 then C.startPick("bonus")
+  elseif p.pending > 0 then C.startPick("level")
   else
-    offers = nil
+    R.offers = nil
     state = "play"
     p.iframes = max(p.iframes, 20)
   end
 end
 
-gameOver = function()
+function C.choose(i)
+  local it = R.offers and R.offers[i]
+  if not it then return end
+  if R.banishMode then
+    if it.id == "snack" then return end
+    R.banned[it.id] = true
+    R.banishes = R.banishes - 1
+    R.banishMode = false
+    local exclude = {}
+    for _, o in ipairs(R.offers) do exclude[o.id] = true end
+    R.offers[i] = I.roll(owned, stats.luck, 1, R.offerKind == "chest" and "epic" or nil, R.banned, exclude)[1]
+    say(it.name .. " banished", 30, S.A)
+    return
+  end
+  giveItem(it.id)
+  if it.weapon then p.weapon = it.weapon end
+  recompute()
+  if it.heal then p.hp = min(p.maxHp, p.hp + it.heal) end
+  say(it.name .. "!", 40, P.slot[I.RARITY[it.rarity].col])
+  if R.offerKind == "level" then p.pending = p.pending - 1
+  elseif R.offerKind == "bonus" then p.bonus = p.bonus - 1 end
+  C.nextPickOrPlay()
+end
+
+function C.gameOver()
   state = "dead"
-  deadTimer = 0
-  save.runs = (save.runs or 0) + 1
-  if score > (save.best or 0) then save.best = score; newBest = true end
-  if secs() > (save.bestTime or 0) then save.bestTime = floor(secs()) end
-  writeSave()
+  R.deadTimer = 0
+  local mins = secs() / 60
+  local souls = (R.kills / 10 + 5 * mins + 25 * R.bossKills) * stats.souls * Tree.prestigeSouls(prof.prestige)
+  R.soulsEarned = floor(souls)
+  prof.souls = prof.souls + R.soulsEarned
+  prof.soulsTotal = (prof.soulsTotal or 0) + R.soulsEarned
+  prof.runs = prof.runs + 1
+  prof.kills = (prof.kills or 0) + R.kills
+  prof.bosses = (prof.bosses or 0) + R.bossKills
+  if R.score > prof.best then prof.best = R.score; R.newBest = true end
+  if secs() > prof.bestTime then prof.bestTime = floor(secs()) end
+  Prof.save(prof)
+  UI.board = Prof.leaderboard(10)
 end
 
 local function update()
-  tick = tick + 1
+  R.tick = R.tick + 1
+  R.mult = C.runMult()
   buildGrid()
-  updatePlayer()
-  updateBullets()
-  updateMobs()
-  updateEShots()
-  updatePassives()
-  updatePickups()
-  updateSpawns()
-  updateFx()
-  if state == "play" and p.pending > 0 then startPick("LEVEL UP!  Level " .. (p.level - p.pending + 1)) end
+  C.updatePlayer()
+  C.updateBullets()
+  C.updateMobs()
+  C.updateEShots()
+  C.updatePassives()
+  C.updateSpellObjects()
+  C.updatePickups()
+  C.updateSpawns()
+  C.updateFx()
+  if state == "play" and (p.pending > 0 or p.bonus > 0) then C.nextPickOrPlay() end
 end
 
----------------------------------------------------------------------- render
+---------------------------------------------------------------------- skill tree actions
+local TR = {}
+
+function TR.buy()
+  local n = Tree.byId[UI.treeSel]
+  local lvl = prof.tree[n.id] or 0
+  if lvl >= n.max then say("Already maxed", 30, S.A); return end
+  if not Tree.unlocked(n, prof.tree) then say("Locked - buy the node before it first", 40, S.R); return end
+  local cost = Tree.cost(n, lvl + 1)
+  if prof.souls < cost then say("Not enough souls", 30, S.R); return end
+  prof.souls = prof.souls - cost
+  prof.tree[n.id] = lvl + 1
+  Prof.save(prof)
+  sfx("buy")
+end
+
+function TR.move(dx, dy)
+  local cur = Tree.byId[UI.treeSel]
+  local best, bestScore = nil, 1e9
+  for _, n in ipairs(Tree.NODES) do
+    if n ~= cur then
+      local ox, oy = n.x - cur.x, n.y - cur.y
+      local along = ox * dx + oy * dy
+      if along > 0 then
+        local perp = abs(ox * dy) + abs(oy * dx)
+        local score = along + perp * 2.5
+        if score < bestScore then best, bestScore = n, score end
+      end
+    end
+  end
+  if best then UI.treeSel = best.id end
+end
+
+function TR.prestige()
+  if not Tree.allMaxed(prof.tree) then say("Max every node to prestige", 40, S.R); return end
+  if prof.prestige >= Tree.MAX_PRESTIGE then say("Max prestige reached!", 40, S.Y); return end
+  if UI.prestigeArm <= 0 then
+    UI.prestigeArm = 60
+    say("Press X again to PRESTIGE", 60, S.Y)
+    return
+  end
+  prof.prestige = prof.prestige + 1
+  prof.tree = {}
+  UI.prestigeArm = 0
+  UI.treeSel = "root"
+  Prof.save(prof)
+  say("PRESTIGE " .. prof.prestige .. "!", 80, S.Y)
+  sfx("login")
+end
+
+---------------------------------------------------------------------- render helpers
 local camX, camY = 0, 0
 local drawList, nDraw = {}, 0
 
@@ -902,8 +1305,14 @@ local function zsort(a, b) return a[6] < b[6] end
 local function line(x1, y1, x2, y2, col)
   local dx, dy = x2 - x1, y2 - y1
   local n = max(1, floor(max(abs(dx), abs(dy))))
-  for i = 0, n do
-    scr.pixel(x1 + dx * i / n - camX, y1 + dy * i / n - camY, col)
+  for i = 0, n do scr.pixel(x1 + dx * i / n - camX, y1 + dy * i / n - camY, col) end
+end
+
+local function circle(x, y, rad, col, step)
+  local n = max(8, floor(rad * 2 / (step or 1)))
+  for i = 1, n do
+    local a = i / n * 2 * pi
+    scr.pixel(x + cos(a) * rad - camX, y + sin(a) * rad - camY, type(col) == "table" and col[random(#col)] or col)
   end
 end
 
@@ -918,16 +1327,33 @@ local function box(x, y, w, h, bg)
   local blank = (" "):rep(w)
   for yy = y, y + h - 1 do scr.text(x, yy, blank, S.W, bg) end
 end
+local function frameBox(x, y, w, h, border)
+  box(x - 1, y - 1, w + 2, h + 2, border)
+  box(x, y, w, h, S.K)
+end
 
+local function stars(n)
+  return n > 0 and ("*"):rep(n) or ""
+end
+
+---------------------------------------------------------------------- render: world
 local function renderWorld()
-  local sx = shake > 0 and random(-shake, shake) or 0
-  local sy = shake > 0 and random(-shake, shake) or 0
+  local sh = UI.shake
+  local sx = sh > 0 and random(-sh, sh) or 0
+  local sy = sh > 0 and random(-sh, sh) or 0
   camX = floor(p.x + 0.5) - floor(PW / 2) + sx
   camY = floor(p.y - 7 + 0.5) - floor(PH / 2) + sy
 
   world.drawGround(scr, camX, camY)
 
-  -- flat things on the ground
+  -- burning ground
+  for _, f in ipairs(fires) do
+    for _ = 1, floor(f.r * 0.8) do
+      local a, d = random() * 2 * pi, sqrt(random()) * f.r
+      scr.pixel(f.x + cos(a) * d - camX, f.y + sin(a) * d - camY, (random() < 0.5) and S.O or S.R)
+    end
+  end
+
   for _, g in ipairs(gems) do
     scr.sprite(g.v >= 4 and spr.xp_big or spr.xp_orb, g.x - 2 - camX, g.y - 2 - camY)
   end
@@ -938,13 +1364,26 @@ local function renderWorld()
     end
   end
 
-  -- aura ring
+  -- strike target markers
+  for _, s in ipairs(strikes) do
+    if s.kind ~= "chain" and frame % 4 < 3 then
+      local r = (s.kind == "meteor") and 7 or 4
+      circle(s.x, s.y, r, S.R, 2)
+    end
+  end
+
   if stats.aura >= 1 and p.auraFlash > 0 then
-    local rad = (20 + stats.aura * 8) * stats.area
-    local n = floor(rad * 2)
+    circle(p.x, p.y - 6, (20 + stats.aura * 8) * stats.area, S.g, 1)
+  end
+  if stats.firering >= 1 then
+    -- flickering flames: jittered ring of fire colours
+    local rad = C.fireRingRadius()
+    local n = floor(rad * 3)
+    local fc = { S.O, S.R, S.Y, S.O, S.R }
     for i = 1, n do
-      local a = i / n * 2 * pi
-      scr.pixel(p.x + cos(a) * rad - camX, p.y - 6 + sin(a) * rad - camY, S.g)
+      local a = i / n * 2 * pi + frame * 0.05
+      local rr = rad + random(-2, 1)
+      scr.pixel(p.x + cos(a) * rr - camX, p.y - 6 + sin(a) * rr - camY, fc[random(5)])
     end
   end
 
@@ -957,15 +1396,19 @@ local function renderWorld()
     if x + sp.w > camX and x < camX + PW and y + sp.h > camY and y < camY + PH then
       local bob = (m.moving and (frame + m.phase) % 12 < 6) and -1 or 0
       local tint = nil
+      if (m.frozenT or 0) > 0 then tint = S.C
+      elseif (m.shockT or 0) > 0 and frame % 4 < 2 then tint = S.Y end
       if m.flash > 0 then tint = S.W end
       if m.fuse and m.fuse % 4 < 2 then tint = S.W end
       if m.def.ranged and m.cd < 10 and frame % 4 < 2 then tint = S.Y end
       addDraw(sp, x, y + bob, m.flip, tint, m.y)
     end
   end
-  local psp = spr.player
+  local psp = playerSpr[min(10, prof.prestige)] or spr.player
   local pbob = (p.moving and frame % 8 < 4) and -1 or 0
-  local ptint = (p.iframes > 0 and frame % 4 < 2) and S.R or nil
+  local ptint = nil
+  if p.iframes > 0 and frame % 4 < 2 then ptint = S.R end
+  if p.retalT > 0 and frame % 6 < 2 then ptint = S.O end
   addDraw(psp, floor(p.x + 0.5) - 6, floor(p.y + 0.5) - psp.h + 1 + pbob, p.flip, ptint, p.y)
   for i = nDraw + 1, #drawList do drawList[i] = nil end
   table.sort(drawList, zsort)
@@ -974,15 +1417,16 @@ local function renderWorld()
     scr.sprite(e[1], e[2] - camX, e[3] - camY, e[4], e[5])
   end
 
-  -- projectiles
+  -- energy shield bubble
+  if stats.shield >= 1 and p.shieldT >= C.shieldCd() then
+    circle(p.x, p.y - 7, 11, S.C, 3)
+  end
+
   for _, b in ipairs(bullets) do
     local bx, by = b.x - camX, b.y - camY
     scr.pixel(bx, by, b.col)
-    if b.aoe then
-      scr.pixel(bx - b.vx * 0.5, by - b.vy * 0.5, S.O)
-    else
-      scr.pixel(bx - b.vx * 0.3, by - b.vy * 0.3, b.col)
-    end
+    if b.aoe then scr.pixel(bx - b.vx * 0.5, by - b.vy * 0.5, S.O)
+    elseif not b.frag then scr.pixel(bx - b.vx * 0.3, by - b.vy * 0.3, b.col) end
   end
   for _, e in ipairs(eshots) do
     local l = sqrt(e.vx * e.vx + e.vy * e.vy)
@@ -992,39 +1436,59 @@ local function renderWorld()
     scr.pixel(e.x - ux * 2 - camX, e.y - uy * 2 - camY, S.B)
     scr.pixel(e.x - ux * 3 - camX, e.y - uy * 3 - camY, S.W)
   end
-
-  -- saws
-  if stats.saws >= 1 then
-    local ss = (frame % 4 < 2) and spr.saw1 or spr.saw2
-    for _, sp in ipairs(sawPositions()) do scr.sprite(ss, sp[1] - 2 - camX, sp[2] - 2 - camY) end
+  for _, o in ipairs(orbs) do
+    local ox, oy = o.x - camX, o.y - camY
+    scr.pixel(ox, oy, S.W); scr.pixel(ox + 1, oy, S.C); scr.pixel(ox, oy + 1, S.C); scr.pixel(ox + 1, oy + 1, S.C)
   end
 
-  -- lightning + particles
+  -- falling meteors / mortar shells
+  for _, s in ipairs(strikes) do
+    if s.kind == "meteor" then
+      local hx, hy = s.x + s.t * 3, s.y - s.t * 6
+      scr.sprite(spr.meteor, hx - 2 - camX, hy - 2 - camY)
+      for k = 1, 3 do scr.pixel(hx + k * 3 - camX, hy - k * 6 - camY, (k == 1) and S.Y or S.O) end
+    elseif s.kind == "mortar" then
+      local hy = s.y - s.t * 7
+      scr.pixel(s.x - camX, hy - camY, S.D); scr.pixel(s.x - camX, hy + 1 - camY, S.K)
+    end
+  end
+
+  if stats.saws >= 1 then
+    local ss = (frame % 4 < 2) and spr.saw1 or spr.saw2
+    for _, s in ipairs(C.sawPositions()) do scr.sprite(ss, s[1] - 2 - camX, s[2] - 2 - camY) end
+  end
+
   for _, b in ipairs(beams) do
-    line(b[1], b[2], b[3] + random(-1, 1), b[4], (b[5] % 2 == 0) and S.Y or S.W)
+    if b.bolt then
+      -- jagged lightning from the sky
+      local x, y = b[1], b[2]
+      local steps = 8
+      for k = 1, steps do
+        local nx = b[1] + (b[3] - b[1]) * k / steps + ((k < steps) and random(-4, 4) or 0)
+        local ny = b[2] + (b[4] - b[2]) * k / steps
+        line(x, y, nx, ny, (b[5] % 2 == 0) and S.Y or S.W)
+        x, y = nx, ny
+      end
+    else
+      line(b[1], b[2], b[3] + random(-1, 1), b[4], (b[5] % 2 == 0) and S.Y or S.W)
+    end
   end
   for _, q in ipairs(parts) do scr.pixel(q.x - camX, q.y - camY, q.col) end
 end
 
+---------------------------------------------------------------------- render: HUD
 local function renderHUD()
-  -- row 1: hp + stats
   box(1, 1, CW, 1, S.K)
   local filled = ceil(p.hp / p.maxHp * 20)
   T(2, 1, "HP", S.W)
-  local bar = ""
-  local fgs, bgs = "", ""
-  for i = 1, 20 do
-    bar = bar .. " "
-    bgs = bgs .. G.HEX[i <= filled and S.R or S.D]
-    fgs = fgs .. "0"
-  end
-  T(5, 1, bar, fgs, bgs)
-  local info = ("%d/%d   LV %d   %s   Kills %d   Score %d"):format(ceil(p.hp), p.maxHp, p.level, fmtTime(secs()), kills, score)
+  local bgs = {}
+  for i = 1, 20 do bgs[i] = HEX[i <= filled and S.R or S.D] end
+  T(5, 1, (" "):rep(20), ("0"):rep(20), table.concat(bgs))
+  local info = ("%d/%d   LV %d   %s   Kills %d   Score %d"):format(ceil(p.hp), p.maxHp, p.level, fmtTime(secs()), R.kills, R.score)
   T(27, 1, info, S.W)
-  local best = "Best " .. (save.best or 0)
-  T(CW - #best, 1, best, S.A)
+  local who = prof.name .. (prof.prestige > 0 and (" P" .. prof.prestige) or "")
+  T(CW - #who, 1, who, S.Y)
 
-  -- row 2: xp bar with label
   local frac = min(1, p.xp / p.xpNext)
   local fillW = floor(frac * CW)
   local label = ("LEVEL %d   %d / %d XP"):format(p.level, floor(p.xp), p.xpNext)
@@ -1034,28 +1498,22 @@ local function renderHUD()
     local on = x <= fillW
     local ch = " "
     if x >= lx and x < lx + #label then ch = label:sub(x - lx + 1, x - lx + 1) end
-    chars[x] = ch
-    fg2[x] = on and "f" or "8"
-    bg2[x] = G.HEX[on and S.C or S.D]
+    chars[x], fg2[x], bg2[x] = ch, on and "f" or "8", HEX[on and S.C or S.D]
   end
   T(1, 2, table.concat(chars), table.concat(fg2), table.concat(bg2))
 
-  -- boss bar
   local row = 4
-  if boss and not boss.dead then
+  if R.boss and not R.boss.dead then
     local bw = min(CW - 30, 100)
     local bx = floor((CW - bw) / 2) + 1
     T(bx - 13, 3, " GRAVE KING ", S.W, S.R)
-    local bf = floor(max(0, boss.hp) / boss.maxHp * bw)
+    local bf = floor(max(0, R.boss.hp) / R.boss.maxHp * bw)
     T(bx, 3, (" "):rep(bw), S.W, S.D)
     if bf > 0 then T(bx, 3, (" "):rep(bf), S.W, S.R) end
     row = 5
   end
+  if UI.msgTimer > 0 and UI.msg ~= "" then center(row, " " .. UI.msg .. " ", UI.msgCol, S.K) end
 
-  -- message
-  if msgTimer > 0 and msg ~= "" then center(row, " " .. msg .. " ", msgCol, S.K) end
-
-  -- bottom row: weapons
   box(1, CH, CW, 1, S.K)
   local x = 2
   for i = 1, 4 do
@@ -1064,26 +1522,33 @@ local function renderHUD()
     else T(x, CH, lbl, p.unlocked[i] and S.W or S.D, S.K) end
     x = x + #lbl + 1
   end
+  local extra = ""
+  if stats.shield >= 1 then extra = extra .. ((p.shieldT >= C.shieldCd()) and "SHIELD UP   " or "shield ...   ") end
+  if stats.revive >= 1 then extra = extra .. ("Revives %d   "):format(floor(stats.revive + 0.5) - p.revUsed) end
+  T(x + 2, CH, extra, S.C)
   T(CW - 18, CH, "P pause / build", S.A)
 end
 
+---------------------------------------------------------------------- render: overlays
 local function statLines()
   local st = stats
-  local L = {
-    ("Damage      x%.2f"):format(st.dmg),
-    ("Fire rate   x%.2f"):format(st.rate),
-    ("Projectiles +%d"):format(floor(st.proj + 0.5)),
-    ("Pierce      %d"):format(floor(st.pierce + 0.5)),
-    ("Crit        %d%%  x%.2f"):format(floor(st.crit * 100 + 0.5), st.critdmg),
-    ("Move speed  x%.2f"):format(st.speed),
-    ("Max HP      %d"):format(p.maxHp),
-    ("Armor       -%d%% dmg"):format(floor(min(0.6, st.armor * 0.15) * 100 + 0.5)),
-    ("Dodge       %d%%"):format(floor(st.dodge * 100 + 0.5)),
-    ("XP gain     x%.2f"):format(st.xp),
-    ("Luck        %.1f"):format(st.luck),
-    ("Mob spawns  x%.2f"):format(st.spawn),
+  return {
+    ("All damage   x%.2f"):format(st.dmg),
+    ("Gun damage   x%.2f"):format(st.gundmg),
+    ("Area damage  x%.2f"):format(st.aoedmg),
+    ("Fire rate    x%.2f"):format(st.rate),
+    ("Projectiles  +%d   Pierce %d"):format(floor(st.proj + 0.5), floor(st.pierce + 0.5)),
+    ("Crit         %d%%  x%.2f"):format(floor(st.crit * 100 + 0.5), st.critdmg),
+    ("Area size    x%.2f"):format(st.area),
+    ("Max HP       %d"):format(p.maxHp),
+    ("Armor        %.1f  (-%d%% dmg)"):format(st.armor, floor(I.armorReduction(st.armor) * 100 + 0.5)),
+    ("Dodge        %d%%"):format(floor(st.dodge * 100 + 0.5)),
+    ("Lifesteal    %.1f%%"):format(st.lifesteal * 100),
+    ("Move speed   x%.2f"):format(st.speed),
+    ("XP gain      x%.2f"):format(st.xp),
+    ("Luck         %.1f"):format(st.luck),
+    ("Mob spawns   x%.2f"):format(st.spawn),
   }
-  return L
 end
 
 local function ownedList()
@@ -1098,115 +1563,283 @@ local function ownedList()
   return L
 end
 
-local function renderOverlay()
-  if state == "title" then
-    local w, h = 64, 24
-    local x0, y0 = floor((CW - w) / 2) + 1, floor((CH - h) / 2) + 1
-    box(x0 - 1, y0 - 1, w + 2, h + 2, S.D)
-    box(x0, y0, w, h, S.K)
-    center(y0 + 2, "D  E  A  D     Z  O  N  E", S.R)
-    center(y0 + 3, "survive the endless undead", S.A)
-    local lines = {
-      "WASD        move",
-      "SPACE       shoot (hold)",
-      "ARROWS      aim + shoot",
-      "1 2 3 4     switch weapon",
-      "1 2 3       pick item on level up",
-      "R           reroll items",
-      "P           pause / see your build",
-    }
-    for i, l in ipairs(lines) do T(x0 + 14, y0 + 5 + i, l, S.W) end
-    center(y0 + 15, ("Best score %d    Longest run %s    Runs %d"):format(save.best or 0, fmtTime(save.bestTime or 0), save.runs or 0), S.Y)
-    if frame % 20 < 14 then center(y0 + 18, "Press SPACE to start", S.g) end
-    center(y0 + 21, "Q quit", S.A)
-
-  elseif state == "pick" and offers then
-    local cardW = min(44, floor((CW - 12) / 3))
-    local w = cardW * 3 + 8
-    local h = 24
-    local x0, y0 = floor((CW - w) / 2) + 1, floor((CH - h) / 2) + 1
-    box(x0 - 1, y0 - 1, w + 2, h + 2, S.Y)
-    box(x0, y0, w, h, S.K)
-    center(y0 + 1, offerTitle, S.Y)
-    for i, it in ipairs(offers) do
-      local cx = x0 + 2 + (i - 1) * (cardW + 2)
-      local rar = I.RARITY[it.rarity]
-      local rc = P.slot[rar.col]
-      box(cx, y0 + 3, cardW, 17, S.D)
-      T(cx, y0 + 3, (" "):rep(cardW), S.K, rc)
-      T(cx + 1, y0 + 3, "[" .. i .. "]  " .. rar.name, S.K, rc)
-      T(cx + 2, y0 + 5, it.name, S.W, S.D)
-      if it.max > 1 and it.max < 999 then
-        T(cx + 2, y0 + 6, ("owned %d / %d"):format(owned[it.id] or 0, it.max), S.A, S.D)
-      end
-      for j, ln in ipairs(it.lines) do
-        local bad = ln:sub(1, 1) == "!"
-        local text = bad and ln:sub(2) or ln
-        local col = bad and S.R or S.g
-        if text == "EVOLUTION" then col = S.Y end
-        T(cx + 2, y0 + 7 + j, text:sub(1, cardW - 3), col, S.D)
-      end
+local function renderPick()
+  local n = #R.offers
+  local cardW = min(44, floor((CW - 8 - (n - 1) * 2) / n))
+  local w = cardW * n + (n - 1) * 2 + 4
+  local h = 24
+  local x0, y0 = floor((CW - w) / 2) + 1, floor((CH - h) / 2) + 1
+  frameBox(x0, y0, w, h, R.banishMode and S.R or S.Y)
+  center(y0 + 1, R.banishMode and "BANISH which item? (gone for this run)" or C.pickTitle(), R.banishMode and S.R or S.Y)
+  for i, it in ipairs(R.offers) do
+    local cx = x0 + 2 + (i - 1) * (cardW + 2)
+    local rar = I.RARITY[it.rarity]
+    local rc = P.slot[rar.col]
+    box(cx, y0 + 3, cardW, 17, S.D)
+    T(cx, y0 + 3, (" "):rep(cardW), S.K, rc)
+    T(cx + 1, y0 + 3, "[" .. i .. "]  " .. rar.name, S.K, rc)
+    T(cx + 2, y0 + 5, it.name, S.W, S.D)
+    if it.max > 1 and it.max < 999 then
+      T(cx + 2, y0 + 6, ("owned %d / %d"):format(owned[it.id] or 0, it.max), S.A, S.D)
     end
-    local foot = "1 2 3  pick"
-    if rerolls > 0 then foot = foot .. "        R  reroll (" .. rerolls .. " left)" end
-    center(y0 + 22, foot, S.W)
-
-  elseif state == "paused" then
-    local w, h = 80, 26
-    local x0, y0 = floor((CW - w) / 2) + 1, floor((CH - h) / 2) + 1
-    box(x0 - 1, y0 - 1, w + 2, h + 2, S.D)
-    box(x0, y0, w, h, S.K)
-    center(y0 + 1, "PAUSED", S.Y)
-    T(x0 + 3, y0 + 3, "YOUR STATS", S.A)
-    for i, l in ipairs(statLines()) do T(x0 + 3, y0 + 4 + i, l, S.W) end
-    T(x0 + 42, y0 + 3, "YOUR ITEMS", S.A)
-    local items = ownedList()
-    if #items == 0 then T(x0 + 42, y0 + 5, "nothing yet", S.D) end
-    for i, e in ipairs(items) do
-      if i <= 18 then T(x0 + 42, y0 + 4 + i, e[1], e[2]) end
+    for j, ln in ipairs(it.lines) do
+      local bad = ln:sub(1, 1) == "!"
+      local text = bad and ln:sub(2) or ln
+      local col = bad and S.R or S.g
+      if text == "EVOLUTION" then col = S.Y end
+      T(cx + 2, y0 + 7 + j, text:sub(1, cardW - 3), col, S.D)
     end
-    center(y0 + 24, "P / SPACE resume      Q end run", S.W)
-
-  elseif state == "dead" then
-    local w, h = 60, 20
-    local x0, y0 = floor((CW - w) / 2) + 1, floor((CH - h) / 2) + 1
-    box(x0 - 1, y0 - 1, w + 2, h + 2, S.R)
-    box(x0, y0, w, h, S.K)
-    center(y0 + 2, "Y O U   D I E D", S.R)
-    center(y0 + 5, "Survived " .. fmtTime(secs()), S.W)
-    center(y0 + 6, ("Level %d    Kills %d"):format(p.level, kills), S.W)
-    center(y0 + 8, "Score " .. score, S.Y)
-    if newBest then
-      if frame % 10 < 6 then center(y0 + 9, "NEW BEST!", S.g) end
-    else
-      center(y0 + 9, "Best " .. (save.best or 0), S.A)
-    end
-    local items = ownedList()
-    local names = {}
-    for i, e in ipairs(items) do if i <= 6 then names[#names + 1] = e[1] end end
-    if #names > 0 then center(y0 + 12, table.concat(names, ", "):sub(1, w - 4), S.A) end
-    if deadTimer > 30 then center(y0 + 16, "SPACE new run      Q title", S.g) end
   end
+  local keysTxt = (n == 4) and "1 2 3 4  pick" or "1 2 3  pick"
+  if R.rerolls > 0 then keysTxt = keysTxt .. "      R reroll (" .. R.rerolls .. ")" end
+  if R.banishes > 0 then keysTxt = keysTxt .. "      B banish (" .. R.banishes .. ")" end
+  center(y0 + 22, keysTxt, S.W)
+end
+
+local function renderPause()
+  local w, h = 84, 28
+  local x0, y0 = floor((CW - w) / 2) + 1, floor((CH - h) / 2) + 1
+  frameBox(x0, y0, w, h, S.D)
+  center(y0 + 1, "PAUSED", S.Y)
+  T(x0 + 3, y0 + 3, "YOUR STATS", S.A)
+  for i, l in ipairs(statLines()) do T(x0 + 3, y0 + 4 + i, l, S.W) end
+  T(x0 + 46, y0 + 3, "YOUR ITEMS", S.A)
+  local items = ownedList()
+  if #items == 0 then T(x0 + 46, y0 + 5, "nothing yet", S.D) end
+  for i, e in ipairs(items) do
+    if i <= 20 then T(x0 + 46, y0 + 4 + i, e[1], e[2]) end
+  end
+  center(y0 + 26, "P / SPACE resume      Q end run", S.W)
+end
+
+local function renderDead()
+  local w, h = 64, 22
+  local x0, y0 = floor((CW - w) / 2) + 1, floor((CH - h) / 2) + 1
+  frameBox(x0, y0, w, h, S.R)
+  center(y0 + 2, "Y O U   D I E D", S.R)
+  center(y0 + 5, "Survived " .. fmtTime(secs()), S.W)
+  center(y0 + 6, ("Level %d    Kills %d    Bosses %d"):format(p.level, R.kills, R.bossKills), S.W)
+  center(y0 + 8, "Score " .. R.score, S.Y)
+  if R.newBest then
+    if frame % 10 < 6 then center(y0 + 9, "NEW BEST!", S.g) end
+  else
+    center(y0 + 9, "Best " .. prof.best, S.A)
+  end
+  center(y0 + 11, ("+%d souls   (total %d)"):format(R.soulsEarned, prof.souls), S.C)
+  local items = ownedList()
+  local names = {}
+  for i, e in ipairs(items) do if i <= 6 then names[#names + 1] = e[1] end end
+  if #names > 0 then center(y0 + 14, table.concat(names, ", "):sub(1, w - 4), S.A) end
+  if R.deadTimer > 30 then center(y0 + 18, "SPACE new run     T skill tree     Q title", S.g) end
+end
+
+local function renderTitle()
+  -- centre: logo + controls
+  local w, h = 62, 30
+  local x0, y0 = floor((CW - w) / 2) + 1, floor((CH - h) / 2) + 1
+  frameBox(x0, y0, w, h, S.D)
+  center(y0 + 2, "D  E  A  D     Z  O  N  E", S.R)
+  center(y0 + 3, "survive the endless undead", S.A)
+  local lines = {
+    "WASD        move",
+    "SPACE       shoot (hold)",
+    "ARROWS      aim + shoot",
+    "1 2 3 4     switch weapon",
+    "1 2 3       pick item on level up",
+    "R / B       reroll / banish items",
+    "P           pause / see your build",
+  }
+  for i, l in ipairs(lines) do T(x0 + 13, y0 + 5 + i, l, S.W) end
+  if frame % 20 < 14 then center(y0 + 17, "SPACE  start run", S.g) end
+  center(y0 + 19, "T  skill tree", S.C)
+  center(y0 + 20, "N  type a name to log in", S.A)
+  center(y0 + 21, "Q  quit", S.A)
+  if detector then
+    center(y0 + 25, "Right-click the Player Detector to log in", S.Y)
+  end
+
+  -- left: profile
+  local lw = 34
+  local lx = x0 - lw - 4
+  if lx >= 2 then
+    frameBox(lx, y0, lw, 16, S.D)
+    T(lx + 2, y0 + 1, "PLAYER", S.A)
+    T(lx + 2, y0 + 3, prof.name, S.Y)
+    if prof.prestige > 0 then T(lx + 2, y0 + 4, "Prestige " .. prof.prestige .. " " .. stars(prof.prestige), S.O) end
+    T(lx + 2, y0 + 6, "Souls        " .. prof.souls, S.C)
+    T(lx + 2, y0 + 7, "Best score   " .. prof.best, S.W)
+    T(lx + 2, y0 + 8, "Longest run  " .. fmtTime(prof.bestTime), S.W)
+    T(lx + 2, y0 + 9, "Runs         " .. prof.runs, S.W)
+    T(lx + 2, y0 + 10, "Kills        " .. (prof.kills or 0), S.W)
+    local lv, mx = 0, Tree.totalLevels()
+    for _, n in ipairs(Tree.NODES) do lv = lv + (prof.tree[n.id] or 0) end
+    T(lx + 2, y0 + 12, ("Tree %d / %d"):format(lv, mx), S.g)
+  end
+
+  -- right: leaderboard
+  local rx = x0 + w + 4
+  if rx + 36 <= CW then
+    frameBox(rx, y0, 36, 16, S.D)
+    T(rx + 2, y0 + 1, "LEADERBOARD", S.Y)
+    if #UI.board == 0 then T(rx + 2, y0 + 3, "no runs yet", S.D) end
+    for i, e in ipairs(UI.board) do
+      local name = e.name:sub(1, 12)
+      local ps = (e.prestige or 0) > 0 and ("P" .. e.prestige) or "  "
+      T(rx + 2, y0 + 2 + i, ("%2d. %-12s %3s %7d"):format(i, name, ps, e.best or 0), (e.name == prof.name) and S.Y or S.W)
+    end
+  end
+
+  if UI.msgTimer > 0 then center(y0 + h + 2, " " .. UI.msg .. " ", UI.msgCol, S.K) end
+end
+
+local function renderNaming()
+  local w, h = 50, 9
+  local x0, y0 = floor((CW - w) / 2) + 1, floor((CH - h) / 2) + 1
+  frameBox(x0, y0, w, h, S.Y)
+  center(y0 + 1, "TYPE YOUR NAME", S.Y)
+  local shown = UI.nameBuf .. ((frame % 10 < 5) and "_" or " ")
+  center(y0 + 4, shown, S.W)
+  center(y0 + 7, "ENTER confirm     TAB cancel", S.A)
+end
+
+---------------------------------------------------------------------- render: skill tree
+local TREE_SX, TREE_SY, BOX_W = 22, 6, 18
+
+local function renderTree()
+  scr.fillBase(function() return BLACK end)
+  local sel = Tree.byId[UI.treeSel]
+  local topRow, bottomRow = 3, CH - 11
+  local midX = floor(CW / 2)
+  local midY = floor((topRow + bottomRow) / 2)
+  local function cellOf(n)
+    return midX + (n.x - sel.x) * TREE_SX, midY + (n.y - sel.y) * TREE_SY
+  end
+  local lv = prof.tree
+
+  -- connections (pixel layer)
+  for _, n in ipairs(Tree.NODES) do
+    if n.parent then
+      local par = Tree.byId[n.parent]
+      local ax, ay = cellOf(par)
+      local bx, by = cellOf(n)
+      local col = ((lv[n.id] or 0) > 0) and P.slot[Tree.BRANCH_COL[n.branch]] or S.D
+      local px1, py1, px2, py2 = ax * 2 - 1, ay * 3 - 2, bx * 2 - 1, by * 3 - 2
+      local steps = max(abs(px2 - px1), abs(py2 - py1))
+      for i = 0, steps do
+        local x = px1 + (px2 - px1) * i / steps
+        local y = py1 + (py2 - py1) * i / steps
+        if y >= (topRow - 1) * 3 and y < bottomRow * 3 then scr.pixel(x, y, col) end
+      end
+    end
+  end
+
+  -- nodes (text layer)
+  for _, n in ipairs(Tree.NODES) do
+    local cx, cy = cellOf(n)
+    local x = cx - floor(BOX_W / 2)
+    if cy - 1 >= topRow and cy + 1 <= bottomRow and x + BOX_W >= 1 and x <= CW then
+      local l = lv[n.id] or 0
+      local bcol = P.slot[Tree.BRANCH_COL[n.branch]]
+      local unlocked = Tree.unlocked(n, lv)
+      local bg, fg, sub
+      if n.id == UI.treeSel then bg, fg = S.W, S.K
+      elseif l >= n.max then bg, fg = bcol, S.K
+      elseif l > 0 then bg, fg = S.D, bcol
+      elseif unlocked then bg, fg = S.D, S.W
+      else bg, fg = S.K, S.A end
+      local name = n.name:sub(1, BOX_W - 2)
+      local lvTxt = ("%d/%d"):format(l, n.max)
+      if n.key then lvTxt = l > 0 and "KEYSTONE" or "keystone" end
+      if l >= n.max then sub = "MAX"
+      elseif not unlocked then sub = "locked"
+      else sub = Tree.cost(n, l + 1) .. " souls" end
+      local pad = function(s) s = s:sub(1, BOX_W - 2); return " " .. s .. (" "):rep(BOX_W - 1 - #s) end
+      T(x, cy - 1, pad(name), fg, bg)
+      T(x, cy, pad(lvTxt), fg, bg)
+      local subCol = fg
+      if l < n.max and unlocked and n.id ~= UI.treeSel then subCol = (prof.souls >= Tree.cost(n, l + 1)) and S.g or S.R end
+      T(x, cy + 1, pad(sub), subCol, bg)
+    end
+  end
+
+  -- header
+  box(1, 1, CW, 1, S.K)
+  T(2, 1, "SKILL TREE", S.Y)
+  T(16, 1, prof.name .. (prof.prestige > 0 and ("  Prestige " .. prof.prestige .. " " .. stars(prof.prestige)) or ""), S.W)
+  local soulsTxt = "Souls " .. prof.souls
+  T(CW - #soulsTxt - 1, 1, soulsTxt, S.C)
+
+  -- info panel
+  local py = CH - 9
+  box(1, py - 1, CW, 11, S.D)
+  box(2, py, CW - 2, 9, S.K)
+  local l = lv[sel.id] or 0
+  local bcol = P.slot[Tree.BRANCH_COL[sel.branch]]
+  T(4, py + 1, sel.name, bcol)
+  T(4 + #sel.name + 3, py + 1, ("level %d / %d"):format(l, sel.max), S.W)
+  T(4, py + 2, sel.desc .. ((sel.max > 1 and not sel.key) and "  (per level)" or ""), S.W)
+  if l >= sel.max then
+    T(4, py + 4, "MAXED", S.g)
+  elseif not Tree.unlocked(sel, lv) then
+    T(4, py + 4, "Locked - buy " .. Tree.byId[sel.parent].name .. " first", S.R)
+  else
+    local cost = Tree.cost(sel, l + 1)
+    T(4, py + 4, ("Next level: %d souls"):format(cost), (prof.souls >= cost) and S.g or S.R)
+  end
+  local pr = prof.prestige
+  local prTxt = ("Prestige %d/%d   base stats +%d%% of a full tree   mobs +%d%% HP   souls +%d%%"):format(
+    pr, Tree.MAX_PRESTIGE, pr * 10, floor((Tree.prestigeMobHp(pr) - 1) * 100 + 0.5), floor((Tree.prestigeSouls(pr) - 1) * 100 + 0.5))
+  T(4, py + 6, prTxt, S.O)
+  if Tree.allMaxed(lv) and pr < Tree.MAX_PRESTIGE then
+    T(4, py + 7, "EVERYTHING MAXED  -  press X to PRESTIGE", (frame % 10 < 6) and S.Y or S.O)
+  end
+  local keysTxt = "WASD move    SPACE buy    X prestige    Q back"
+  T(CW - #keysTxt - 3, py + 8, keysTxt, S.A)
+  if UI.msgTimer > 0 then center(py - 2, " " .. UI.msg .. " ", UI.msgCol, S.K) end
 end
 
 local function render()
-  if state == "title" then
-    -- slow drift over the field behind the title
-    p.x = p.x + 0.6
+  if state == "tree" then
+    renderTree()
+  else
+    if state == "title" or state == "naming" then p.x = p.x + 0.6 end
+    renderWorld()
+    if state ~= "title" and state ~= "naming" then renderHUD() end
+    if state == "title" then renderTitle()
+    elseif state == "naming" then renderTitle(); renderNaming()
+    elseif state == "pick" then renderPick()
+    elseif state == "paused" then renderPause()
+    elseif state == "dead" then renderDead() end
   end
-  renderWorld()
-  if state ~= "title" then renderHUD() end
-  renderOverlay()
   scr.present()
 end
 
 ---------------------------------------------------------------------- input
 local NUM = { [keys.one] = 1, [keys.two] = 2, [keys.three] = 3, [keys.four] = 4 }
 
+local function startRun()
+  newRun()
+  state = "play"
+end
+
+local function toTitle()
+  newRun()
+  state = "title"
+  UI.board = Prof.leaderboard(10)
+end
+
 local function onKey(k)
   if state == "title" then
-    if k == keys.space or k == keys.enter then newRun(); state = "play"
+    if k == keys.space or k == keys.enter then startRun()
+    elseif k == keys.t then state = "tree"
+    elseif k == keys.n then state = "naming"; UI.nameBuf = ""
     elseif k == keys.q then running = false end
+  elseif state == "naming" then
+    if k == keys.enter then
+      if #UI.nameBuf > 0 then login(UI.nameBuf) end
+      state = "title"
+    elseif k == keys.backspace then UI.nameBuf = UI.nameBuf:sub(1, -2)
+    elseif k == keys.tab then state = "title" end
   elseif state == "play" then
     if k == keys.p then state = "paused"
     elseif NUM[k] then
@@ -1216,17 +1849,30 @@ local function onKey(k)
     end
   elseif state == "pick" then
     local n = NUM[k]
-    if n and n <= 3 then choose(n)
-    elseif k == keys.r and rerolls > 0 then
-      rerolls = rerolls - 1
-      offers = I.roll(owned, stats.luck, 3, offerTitle:sub(1, 5) == "TREAS" and "epic" or nil)
+    if n and n <= #R.offers then C.choose(n)
+    elseif k == keys.r and R.rerolls > 0 and not R.banishMode then
+      R.rerolls = R.rerolls - 1
+      R.offers = I.roll(owned, stats.luck, C.offerCount(), R.offerKind == "chest" and "epic" or nil, R.banned)
+    elseif k == keys.b and R.banishes > 0 then
+      R.banishMode = not R.banishMode
     end
   elseif state == "paused" then
     if k == keys.p or k == keys.space then state = "play"
-    elseif k == keys.q then gameOver() end
+    elseif k == keys.q then C.gameOver() end
   elseif state == "dead" then
-    if deadTimer > 30 and (k == keys.space or k == keys.enter) then newRun(); state = "play"
-    elseif k == keys.q then newRun(); state = "title" end
+    if R.deadTimer > 30 then
+      if k == keys.space or k == keys.enter then startRun()
+      elseif k == keys.t then state = "tree"
+      elseif k == keys.q then toTitle() end
+    end
+  elseif state == "tree" then
+    if k == keys.w then TR.move(0, -1)
+    elseif k == keys.s then TR.move(0, 1)
+    elseif k == keys.a then TR.move(-1, 0)
+    elseif k == keys.d then TR.move(1, 0)
+    elseif k == keys.space or k == keys.enter then TR.buy()
+    elseif k == keys.x then TR.prestige()
+    elseif k == keys.q or k == keys.t then toTitle() end
   end
 end
 
@@ -1243,9 +1889,10 @@ local function drawController()
     { "WASD     move", colours.white },
     { "SPACE    shoot", colours.white },
     { "ARROWS   aim + shoot", colours.white },
-    { "1-4      weapons", colours.white },
-    { "1-3      pick item,  R reroll", colours.white },
+    { "1-4      weapons / pick items", colours.white },
+    { "R / B    reroll / banish", colours.white },
     { "P        pause / build", colours.white },
+    { "T        skill tree (title screen)", colours.white },
   }
   for i, l in ipairs(lines) do
     native.setCursorPos(2, i + 1)
@@ -1256,7 +1903,7 @@ end
 
 ---------------------------------------------------------------------- main loop
 local function main()
-  loadSave()
+  UI.board = Prof.leaderboard(10)
   newRun()
   state = "title"
   drawController()
@@ -1268,13 +1915,23 @@ local function main()
       timer = os.startTimer(0.05)
       frame = frame + 1
       if state == "play" then update() end
-      if state == "dead" then deadTimer = deadTimer + 1 end
+      if state == "dead" then R.deadTimer = R.deadTimer + 1 end
+      if state ~= "play" and UI.msgTimer > 0 then UI.msgTimer = UI.msgTimer - 1 end
+      if UI.prestigeArm > 0 then UI.prestigeArm = UI.prestigeArm - 1 end
       render()
     elseif e == "key" then
       held[ev[2]] = true
       if not ev[3] then onKey(ev[2]) end
     elseif e == "key_up" then
       held[ev[2]] = nil
+    elseif e == "char" and state == "naming" then
+      if #UI.nameBuf < 16 and ev[2]:match("[%w_%-]") then UI.nameBuf = UI.nameBuf .. ev[2] end
+    elseif e == "playerClick" then
+      -- Advanced Peripherals Player Detector: right-click to log in
+      if state == "title" or state == "dead" or state == "tree" or state == "naming" then
+        login(ev[2])
+        if state == "naming" then state = "title" end
+      end
     elseif e == "terminate" then
       running = false
     end
