@@ -81,7 +81,7 @@ I.LIST = {
   { id = "orbs",    name = "Arcane Orbs",   rarity = "rare", max = 4, mods = { orbs = 1 },               lines = { "+1 homing orb every second" } },
 
   ---------------------------------------------------------------- epic (big power, real cost)
-  { id = "glass",     name = "Glass Cannon", rarity = "epic", max = 2, mods = { dmg_x = 2, maxhp_x = 0.5 }, lines = { "x2 all damage", "!-50% max HP" } },
+  { id = "glass",     name = "Glass Cannon", rarity = "epic", max = 2, mods = { dmg_x = 2, maxhp_x = 0.5 }, lines = { "x2 all damage", "!Halves base max HP", "(flat +HP bonuses still count fully)" } },
   { id = "blood",     name = "Blood Pact",   rarity = "epic", max = 2, mods = { bloodpact = 0.05 },  lines = { "+5% damage per missing HP" } },
   { id = "greed",     name = "Greed",        rarity = "epic", max = 2, mods = { xp_pct = 0.6, spawn_pct = 0.3 }, lines = { "+60% XP", "!+30% more mobs" } },
   { id = "overclock", name = "Overclock",    rarity = "epic", max = 2, mods = { rate_x = 1.5, drain = 1 }, lines = { "x1.5 fire rate", "!Lose 1 HP every 20s" } },
@@ -93,7 +93,7 @@ I.LIST = {
   { id = "marks",     name = "Marksman",     rarity = "epic", max = 2, mods = { gundmg_x = 1.8, aoedmg_x = 0.5 }, lines = { "x1.8 gun damage", "!x0.5 area damage" } },
   { id = "shrap",     name = "Shrapnel",     rarity = "epic", max = 2, mods = { shrapnel = 5 },      lines = { "Explosions throw 5 fragments" } },
   { id = "napalm",    name = "Napalm",       rarity = "epic", max = 2, mods = { napalm = 1 },        lines = { "Explosions leave burning ground" } },
-  { id = "jugg",      name = "Juggernaut",   rarity = "epic", max = 2, mods = { maxhp_x = 2, speed_pct = -0.2 }, lines = { "x2 max HP", "!-20% move speed" } },
+  { id = "jugg",      name = "Juggernaut",   rarity = "epic", max = 2, mods = { maxhp_x = 2, speed_pct = -0.2 }, lines = { "x2 base max HP", "!-20% move speed" } },
   { id = "retal",     name = "Retaliation",  rarity = "epic", max = 2, mods = { retal = 1 },         lines = { "x2 damage for 3s after a hit" } },
   { id = "pyro",      name = "Pyromaniac",   rarity = "epic", max = 2, mods = { pyro = 0.3, burn_x = 1.5 }, lines = { "Burning mobs take +30% damage", "x1.5 burn damage" } },
   { id = "permafrost", name = "Permafrost",  rarity = "epic", max = 1, mods = { permafrost = 0.4 },  lines = { "Frozen / chilled mobs take", "+40% damage" } },
@@ -152,6 +152,9 @@ for _, it in ipairs(I.LIST) do
   it.parsed = parseMods(it.mods, "item " .. it.id)
 end
 
+-- stats whose flat bonuses are added after multipliers
+local FLAT_AFTER_MULT = { maxhp = true }
+
 -- owned: id -> stacks.  extra: list of { stat, kind, value, times } (skill tree)
 function I.compute(owned, extra)
   local flat, pct, mul = {}, {}, {}
@@ -172,7 +175,13 @@ function I.compute(owned, extra)
   end
   local out = {}
   for k, base in pairs(I.BASE) do
-    out[k] = (base + flat[k]) * math.max(0, 1 + pct[k]) * mul[k]
+    local p = math.max(0, 1 + pct[k])
+    if FLAT_AFTER_MULT[k] then
+      -- "+3 max HP" always means +3: multipliers (Glass Cannon, Juggernaut) only touch base + %
+      out[k] = base * p * mul[k] + flat[k] * p
+    else
+      out[k] = (base + flat[k]) * p * mul[k]
+    end
   end
   return out
 end
