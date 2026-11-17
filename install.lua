@@ -27,11 +27,24 @@ term.setTextColour(colours.red)
 print("DEAD ZONE installer")
 term.setTextColour(colours.white)
 
-local bust = "?t=" .. os.epoch("utc")  -- skip GitHub's cache so updates show up right away
+-- GitHub caches ".../main/..." for ~5 minutes, so download from the latest
+-- commit id instead: updates show up the moment they're pushed.
+local base = REPO
+local api = http.get("https://api.github.com/repos/TheWhiteRabbit78/DeadZone/commits/main",
+  { ["Accept"] = "application/vnd.github.sha" })
+if api then
+  local sha = api.readAll():match("^%x+")
+  api.close()
+  if sha and #sha >= 7 then
+    base = "https://raw.githubusercontent.com/TheWhiteRabbit78/DeadZone/" .. sha .. "/"
+    print("Version " .. sha:sub(1, 7))
+  end
+end
+
 local failed = 0
 for _, f in ipairs(FILES) do
   write("  " .. f .. " ... ")
-  local res, err = http.get(REPO .. f .. bust, nil, true)
+  local res, err = http.get(base .. f, nil, true)
   if res then
     local data = res.readAll()
     res.close()
