@@ -2,9 +2,12 @@
 
 local N = {}
 
-N.VERSION = "v2.40"
+N.VERSION = "v2.41"
 
 N.LIST = {
+  { "v2.41", "Arrow keys in the skill tree", {
+    "Arrow keys move around the skill tree, same as WASD",
+  } },
   { "v2.40", "Smarter offers + patch notes", {
     "Combo items only show up when you own something they work with",
     "  (Conductor, Permafrost, Pyromaniac, Focus Crystal, Shrapnel, Napalm, ...)",

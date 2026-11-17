@@ -2324,7 +2324,7 @@ local function renderTree()
   if Tree.allMaxed(lv) and pr < Tree.MAX_PRESTIGE then
     T(4, py + 7, "EVERYTHING MAXED  -  press X to PRESTIGE", (frame % 10 < 6) and S.Y or S.O)
   end
-  local keysTxt = "WASD move    SPACE buy    X prestige    Q back"
+  local keysTxt = "WASD/arrows move    SPACE buy    X prestige    Q back"
   T(CW - #keysTxt - 3, py + 8, keysTxt, S.A)
   if UI.msgTimer > 0 then center(py - 2, " " .. UI.msg .. " ", UI.msgCol, S.K) end
 end
@@ -2406,10 +2406,10 @@ local function onKey(k)
       elseif k == keys.q then toTitle() end
     end
   elseif state == "tree" then
-    if k == keys.w then TR.move(0, -1)
-    elseif k == keys.s then TR.move(0, 1)
-    elseif k == keys.a then TR.move(-1, 0)
-    elseif k == keys.d then TR.move(1, 0)
+    if k == keys.w or k == keys.up then TR.move(0, -1)
+    elseif k == keys.s or k == keys.down then TR.move(0, 1)
+    elseif k == keys.a or k == keys.left then TR.move(-1, 0)
+    elseif k == keys.d or k == keys.right then TR.move(1, 0)
     elseif k == keys.space or k == keys.enter then TR.buy()
     elseif k == keys.x then TR.prestige()
     elseif k == keys.q or k == keys.t then toTitle() end
