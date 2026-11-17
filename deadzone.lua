@@ -1655,7 +1655,11 @@ local function renderTitle()
   center(y0 + 20, "N  type a name to log in", S.A)
   center(y0 + 21, "Q  quit", S.A)
   if detector then
-    center(y0 + 25, "Right-click the Player Detector to log in", S.Y)
+    center(y0 + 24, "Player Detector: connected", S.g)
+    center(y0 + 25, "Stand next to it (or right-click it) to log in", S.Y)
+  else
+    center(y0 + 24, "Player Detector: not found", S.R)
+    center(y0 + 25, "It must touch the computer (or use a wired modem)", S.A)
   end
 
   -- left: profile
@@ -1918,6 +1922,13 @@ local function main()
       if state == "dead" then R.deadTimer = R.deadTimer + 1 end
       if state ~= "play" and UI.msgTimer > 0 then UI.msgTimer = UI.msgTimer - 1 end
       if UI.prestigeArm > 0 then UI.prestigeArm = UI.prestigeArm - 1 end
+      -- auto login: exactly one player standing near the Player Detector
+      if detector and frame % 40 == 0 and (state == "title" or state == "dead" or state == "tree") then
+        local ok, list = pcall(detector.getPlayersInRange, 5)
+        if ok and type(list) == "table" and #list == 1 and type(list[1]) == "string" then
+          login(list[1])
+        end
+      end
       render()
     elseif e == "key" then
       held[ev[2]] = true
@@ -1928,7 +1939,7 @@ local function main()
       if #UI.nameBuf < 16 and ev[2]:match("[%w_%-]") then UI.nameBuf = UI.nameBuf .. ev[2] end
     elseif e == "playerClick" then
       -- Advanced Peripherals Player Detector: right-click to log in
-      if state == "title" or state == "dead" or state == "tree" or state == "naming" then
+      if state == "title" or state == "dead" or state == "tree" or state == "naming" or state == "paused" then
         login(ev[2])
         if state == "naming" then state = "title" end
       end
