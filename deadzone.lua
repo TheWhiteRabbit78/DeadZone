@@ -47,7 +47,20 @@ P.apply(out)
 local scr = G.new(out)
 local PW, PH, CW, CH = scr.PW, scr.PH, scr.CW, scr.CH
 local speaker = peripheral.find("speaker")
-local detector = peripheral.find("playerDetector")
+-- find the Player Detector by any type spelling (playerDetector / player_detector / ...)
+local detector, detectorName
+local function findDetector()
+  detector, detectorName = nil, nil
+  for _, name in ipairs(peripheral.getNames()) do
+    for _, t in ipairs({ peripheral.getType(name) }) do
+      if type(t) == "string" and t:lower():gsub("[_%s%-]", ""):find("playerdetector") then
+        detector, detectorName = peripheral.wrap(name), name
+        return
+      end
+    end
+  end
+end
+findDetector()
 Prof.init(dir)
 
 ---------------------------------------------------------------------- sprites
@@ -1903,6 +1916,17 @@ local function drawController()
     native.setTextColour(l[2])
     native.write(l[1])
   end
+  -- what is attached (helps when the Player Detector isn't found)
+  local y = #lines + 3
+  native.setCursorPos(2, y)
+  native.setTextColour(colours.yellow)
+  native.write("Attached peripherals:")
+  for _, name in ipairs(peripheral.getNames()) do
+    y = y + 1
+    native.setCursorPos(3, y)
+    native.setTextColour((name == detectorName) and colours.lime or colours.lightGrey)
+    native.write(name .. " = " .. table.concat({ peripheral.getType(name) }, ", "))
+  end
 end
 
 ---------------------------------------------------------------------- main loop
@@ -1943,6 +1967,9 @@ local function main()
         login(ev[2])
         if state == "naming" then state = "title" end
       end
+    elseif e == "peripheral" or e == "peripheral_detach" then
+      findDetector()
+      drawController()
     elseif e == "terminate" then
       running = false
     end
