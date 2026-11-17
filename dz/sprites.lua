@@ -217,4 +217,37 @@ S.rock = {
   ".KKKKKKKK.",
 }
 
+S.xp_big = {
+  ".YY.",
+  "YWYY",
+  "YYYY",
+  ".YY.",
+}
+
+S.chest = {
+  ".KKKKKK.",
+  "KNNNNNNK",
+  "KBBBBBBK",
+  "KKKYYKKK",
+  "KNNYYNNK",
+  "KNNNNNNK",
+  "KKKKKKKK",
+}
+
+S.saw1 = {
+  "A.A.A",
+  ".AWA.",
+  "AWDWA",
+  ".AWA.",
+  "A.A.A",
+}
+
+S.saw2 = {
+  "..A..",
+  ".AWA.",
+  "AWDWA",
+  ".AWA.",
+  "..A..",
+}
+
 return S

@@ -11,7 +11,7 @@ P.list = {
   { "N", 2,  138,  86,  52 }, -- brown cloth
   { "C", 3,   94, 230, 230 }, -- cyan (XP)
   { "Y", 4,  242, 211,  74 }, -- yellow (bullets, gold)
-  { "g", 5,   76, 138,  60 }, -- light grass / leaf highlight
+  { "g", 5,   88, 156,  68 }, -- light grass / leaf highlight
   { "S", 6,  227, 179, 138 }, -- skin
   { "D", 7,   64,  64,  64 }, -- dark grey
   { "A", 8,  128, 128, 128 }, -- grey (stone, metal)

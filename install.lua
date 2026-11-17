@@ -8,10 +8,14 @@ local FILES = {
   "dz/palette.lua",
   "dz/gfx.lua",
   "dz/sprites.lua",
+  "dz/world.lua",
+  "dz/items.lua",
+  "deadzone.lua",
   "speedtest.lua",
 }
 -- launchers created in the root folder: name -> program inside DEST
 local LAUNCHERS = {
+  deadzone = "deadzone.lua",
   speedtest = "speedtest.lua",
 }
 
@@ -46,7 +50,7 @@ for name, prog in pairs(LAUNCHERS) do
 end
 
 if failed == 0 then
-  print("Done. Run: speedtest")
+  print("Done. Run: deadzone")
 else
   print(failed .. " file(s) failed - try again.")
 end

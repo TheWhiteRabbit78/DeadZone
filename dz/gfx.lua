@@ -227,12 +227,20 @@ function G.new(t)
     -- text
     for k = 1, nTexts do
       local e = texts[k]
-      local cx, cy, s, fg, bg = e[1], e[2], e[3], HEX[e[4]], HEX[e[5]]
+      local cx, cy, s, fg, bg = e[1], e[2], e[3], e[4], e[5]
+      -- fg / bg: a slot number (whole string) or a hex string (one per char)
+      local fgs, bgs = type(fg) == "string", type(bg) == "string"
+      if not fgs then fg = HEX[fg] end
+      if not bgs then bg = HEX[bg] end
       if cy >= 1 and cy <= CH then
         local c, f, b = rc[cy], rf[cy], rb[cy]
         for i = 1, #s do
           local x = cx + i - 1
-          if x >= 1 and x <= CW then c[x], f[x], b[x] = s:sub(i, i), fg, bg end
+          if x >= 1 and x <= CW then
+            c[x] = s:sub(i, i)
+            f[x] = fgs and fg:sub(i, i) or fg
+            b[x] = bgs and bg:sub(i, i) or bg
+          end
         end
       end
     end
