@@ -804,7 +804,9 @@ function C.fireMagic(w, baseA, ox, oy, range)
         local dx, dy = m.x - ox, (m.y - 6) - oy
         local t = dx * ca + dy * sa
         if t > 0 and t < len and abs(dx * sa - dy * ca) < m.def.r + width then
-          C.damageMob(m, crit(dmg), ca, sa, false, "laser spear")
+          local d = crit(dmg)
+          C.damageMob(m, d, ca, sa, false, "laser spear")
+          C.coilProc(m, d)
         end
       end
     end
@@ -814,11 +816,13 @@ function C.fireMagic(w, baseA, ox, oy, range)
     local hit = {}
     local fx, fy = ox, oy
     local cur = nearestMob(ox, oy, range, hit)
-    for _ = 1, 4 + extra do
+    for _ = 1, 5 + extra do
       if not cur then break end
       hit[cur] = true
       beams[#beams + 1] = { fx, fy, cur.x, cur.y - 6, 3, zap = true }
-      C.damageMob(cur, crit(dmg), nil, nil, false, "storm wand")
+      local d = crit(dmg)
+      C.damageMob(cur, d, nil, nil, false, "storm wand")
+      C.coilProc(cur, d)
       cur.shockT = 30
       fx, fy = cur.x, cur.y - 6
       cur = nearestMob(fx, fy + 6, 60, hit)
@@ -828,6 +832,23 @@ function C.fireMagic(w, baseA, ox, oy, range)
   local desired = w.cd * stats.cdr
   p.cd = p.cd + max(1, desired)
   sfx("shoot")
+end
+
+-- storm coil: chance on any weapon hit (guns and mage weapons) to zap 3 nearby mobs
+function C.coilProc(m, dmg)
+  if stats.chain > 0 and random() < stats.chain then
+    local from, zapped = m, { [m] = true }
+    for _ = 1, 3 do
+      local t = nearestMob(from.x, from.y - 6, 60, zapped)
+      if not t then break end
+      zapped[t] = true
+      beams[#beams + 1] = { from.x, from.y - 6, t.x, t.y - 6, 3 }
+      if stats.conductor > 0 then t.shockT = 40 end
+      C.damageMob(t, dmg * 0.6, nil, nil, false, "lightning")
+      from = t
+    end
+    sfx("zap")
+  end
 end
 
 function C.bulletHit(b, m)
@@ -842,6 +863,7 @@ function C.bulletHit(b, m)
   C.damageMob(m, dmg, b.vx, b.vy, false, b.src or "gun")
   sfx("hit")
   if b.frag then return end
+  C.coilProc(m, dmg)
   if b.magic then
     if b.magic == "frost" and not m.dead then m.chillT = 40 end
     return
@@ -850,21 +872,6 @@ function C.bulletHit(b, m)
   -- explosive rounds
   if stats.exround > 0 and not b.aoe then
     C.explode(b.x, b.y, 10, b.dmg / stats.gundmg * 0.35 * stats.exround, { player = true, small = true, src = "exp. rounds" })
-  end
-
-  -- storm coil: chain lightning
-  if stats.chain > 0 and random() < stats.chain then
-    local from, zapped = m, { [m] = true }
-    for _ = 1, 3 do
-      local t = nearestMob(from.x, from.y - 6, 60, zapped)
-      if not t then break end
-      zapped[t] = true
-      beams[#beams + 1] = { from.x, from.y - 6, t.x, t.y - 6, 3 }
-      if stats.conductor > 0 then t.shockT = 40 end
-      C.damageMob(t, dmg * 0.6, nil, nil, false, "lightning")
-      from = t
-    end
-    sfx("zap")
   end
 
   -- splitter
@@ -2548,6 +2555,10 @@ local function drawPickCard(it, i, x0, y0, w, h)
   T(x0 + 1, y0 + 1, blank, S.W, S.K)
   T(x0 + 2, y0 + 1, "[" .. i .. "]", S.W, S.K)
   T(x0 + w - #rar.name - 2, y0 + 1, rar.name, rc, S.K)
+  if it.tag then
+    local tc = (it.tag == "GUNS") and S.Y or S.C
+    T(x0 + floor((w - #it.tag - 2) / 2), y0 + 1, " " .. it.tag .. " ", S.K, tc)
+  end
   T(x0 + 1, y0 + 2, blank, S.W, S.K)
   -- big icon (24x24 art, falls back to a scaled mini icon)
   local spr = itemSprite(it.id)

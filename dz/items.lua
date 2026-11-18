@@ -51,7 +51,7 @@ I.LIST = {
   { id = "notes",   name = "Study Notes",      rarity = "common", max = 3, mods = { xp_pct = 0.15 },     lines = { "+15% XP" } },
   { id = "powder",  name = "Black Powder",     rarity = "common", max = 5, mods = { aoedmg_pct = 0.12 }, lines = { "+12% area damage" } },
   { id = "padding", name = "Padded Vest",      rarity = "common", max = 4, mods = { armor = 0.5 },       lines = { "+0.5 armor" } },
-  { id = "focus",   name = "Focus Crystal",    rarity = "common", max = 3, mods = { cdr_pct = -0.10 },   lines = { "Spells recharge 10% faster" } },
+  { id = "focus",   name = "Focus Crystal",    rarity = "common", max = 3, mods = { cdr_pct = -0.10 },   lines = { "Spells recharge 10% faster", "Mage weapons fire faster too" } },
 
   ---------------------------------------------------------------- rare
   { id = "barrel",  name = "Extra Barrel",  rarity = "rare", max = 3, mods = { proj = 1, gundmg_pct = -0.10 }, lines = { "+1 projectile", "!-10% gun damage" } },
@@ -67,7 +67,7 @@ I.LIST = {
   { id = "w4",      name = "Launcher",      rarity = "rare", max = 1, mods = {}, weapon = 4, lines = { "New weapon", "Explosive rockets" } },
   { id = "staff",   name = "Arcane Staff",  rarity = "rare", max = 1, mods = {}, weapon = 5, lines = { "New mage weapon", "Slow homing orbs", "Scales with area damage", "and spell cooldown" } },
   { id = "spear",   name = "Laser Spear",   rarity = "rare", max = 1, mods = {}, weapon = 6, lines = { "New mage weapon", "Instant beam, pierces all", "Scales with area damage", "and spell cooldown" } },
-  { id = "wand",    name = "Storm Wand",    rarity = "rare", max = 1, mods = {}, weapon = 7, lines = { "New mage weapon", "Lightning jumps 5 targets", "Scales with area damage", "and spell cooldown" } },
+  { id = "wand",    name = "Storm Wand",    rarity = "rare", max = 1, mods = {}, weapon = 7, lines = { "New mage weapon", "Lightning jumps to 5 mobs", "Scales with area damage", "and spell cooldown" } },
   { id = "fstaff",  name = "Frost Staff",   rarity = "rare", max = 1, mods = {}, weapon = 8, lines = { "New mage weapon", "Shard fan that slows", "Scales with area damage", "and spell cooldown" } },
   { id = "ember",   name = "Ember Rod",     rarity = "rare", max = 1, mods = {}, weapon = 9, lines = { "New mage weapon", "Exploding fireballs", "Scales with area damage", "and spell cooldown" } },
   -- explosion line
@@ -90,7 +90,7 @@ I.LIST = {
   { id = "blood",     name = "Blood Pact",   rarity = "epic", max = 2, mods = { bloodpact = 0.05 },  lines = { "+5% damage per 10 missing HP" } },
   { id = "greed",     name = "Greed",        rarity = "epic", max = 2, mods = { xp_pct = 0.6, spawn_pct = 0.3 }, lines = { "+60% XP", "!+30% more mobs" } },
   { id = "overclock", name = "Overclock",    rarity = "epic", max = 2, mods = { rate_x = 1.5, drain = 1 }, lines = { "x1.5 fire rate", "!Lose 10 HP every 20s" } },
-  { id = "coil",      name = "Storm Coil",   rarity = "epic", max = 3, mods = { chain = 0.15 },      lines = { "15% on hit: zap 3 nearby mobs" } },
+  { id = "coil",      name = "Storm Coil",   rarity = "epic", max = 3, mods = { chain = 0.15 },      lines = { "15% on hit: zap 3 nearby mobs", "Works with guns and mage weapons" } },
   { id = "split",     name = "Splitter",     rarity = "epic", max = 2, mods = { split = 1 },         lines = { "Bullets split in 2 on hit" } },
   { id = "rico",      name = "Ricochet",     rarity = "epic", max = 3, mods = { ricochet = 1 },      lines = { "Bullets bounce to another mob" } },
   { id = "corpse",    name = "Corpse Bomb",  rarity = "epic", max = 3, mods = { corpse = 0.25 },     lines = { "25% chance: kills explode" } },
@@ -125,7 +125,7 @@ I.LIST = {
 }
 
 -- combo items are only offered once you own something they work with
-local SPELLS_CD = { "meteor", "frost", "thunder", "orbs" }
+local SPELLS_CD = { "meteor", "frost", "thunder", "orbs", "staff", "spear", "wand", "fstaff", "ember" }
 local FIRE = { "firering", "meteor", "napalm", "inferno" }
 local BOOMS = { "w4", "exround", "mortar", "meteor", "corpse", "spike" }
 local AREA = { "w4", "staff", "spear", "wand", "fstaff", "ember", "exround", "mortar", "corpse", "spike", "aura", "firering", "meteor", "frost", "thunder", "orbs", "napalm", "shrap" }
@@ -175,6 +175,34 @@ for _, it in ipairs(I.LIST) do
   I.byId[it.id] = it
   it.parsed = parseMods(it.mods, "item " .. it.id)
 end
+
+-- card tag: which weapons an item helps. GUNS = only bullets, SPELLS = spells
+-- and mage weapons (cooldown), MAGE = mage weapon. No tag = helps everything.
+local GUN_ONLY = { gundmg = true, rate = true, pierce = true, exround = true, split = true, ricochet = true }
+local function tagOf(it)
+  if it.weapon then return (it.weapon >= 5) and "MAGE" or "GUNS" end
+  local good, gun, spell = 0, 0, 0
+  for k, v in pairs(it.mods) do
+    local stat, kind = k, "flat"
+    local a = k:match("^(.+)_pct$")
+    if a then stat, kind = a, "pct" end
+    local b = k:match("^(.+)_x$")
+    if b then stat, kind = b, "x" end
+    local positive
+    if kind == "x" then positive = v > 1 else positive = v > 0 end
+    if stat == "cdr" then positive = not positive end
+    if stat == "drain" then positive = false end
+    if positive then
+      good = good + 1
+      if GUN_ONLY[stat] then gun = gun + 1 elseif stat == "cdr" then spell = spell + 1 end
+    end
+  end
+  if good > 0 and gun == good then return "GUNS" end
+  if good > 0 and spell == good then return "SPELLS" end
+  return nil
+end
+for _, it in ipairs(I.LIST) do it.tag = tagOf(it) end
+for _, it in ipairs(I.FILLERS) do it.tag = tagOf(it) end
 
 -- owned: id -> stacks.  extra: list of { stat, kind, value, times } (skill tree)
 -- order (optional): item ids in pickup order. Max HP is then built step by step:

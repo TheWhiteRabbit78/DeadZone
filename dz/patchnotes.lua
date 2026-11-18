@@ -2,9 +2,16 @@
 
 local N = {}
 
-N.VERSION = "v2.80"
+N.VERSION = "v2.81"
 
 N.LIST = {
+  { "v2.81", "Weapon tags", {
+    "Level-up cards now show GUNS / MAGE / SPELLS when an item",
+    "  only helps that kind of weapon (no tag = helps everything)",
+    "Storm Coil now also procs on mage weapon hits",
+    "Focus Crystal speeds up mage weapons too (and is offered for them)",
+    "Fix: Storm Wand really jumps to 5 mobs now, like the card says",
+  } },
   { "v2.80", "Biomes + mage weapons", {
     "9 biomes, laid out like Minecraft: temperature + humidity",
     "  Cold: Snow Tundra, Snowy Forest, Frozen Bog",
