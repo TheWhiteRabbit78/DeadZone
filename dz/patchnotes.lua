@@ -2,9 +2,20 @@
 
 local N = {}
 
-N.VERSION = "v2.92"
+N.VERSION = "v3.00"
 
 N.LIST = {
+  { "v3.00", "Hostile military bases", {
+    "Rare walled compounds out in the world (never near the start)",
+    "Red-uniform army inside: 8 soldiers + 2 MG nests, very tough",
+    "They shoot you AND the zombies - walls block bullets both ways,",
+    "  get in through the gates (west, east, south)",
+    "Kill every defender to capture it: +40 souls and an ARMORY chest",
+    "Armory: 7 military items, no drawbacks, only found in bases",
+    "  (x2 fire rate, x2 gun dmg, +3 projectiles, x1.5 all damage...)",
+    "Inside a captured base: guns get +50% damage and fire rate",
+    "Biome borders draw faster",
+  } },
   { "v2.92", "New biome mobs", {
     "Yeti (snow brute, chills), Wendigo (fast snow hunter, chills)",
     "Mammoth (frozen bog): winds up, then charges - watch the red lane",

@@ -70,6 +70,14 @@ Prof.init(dir)
 ---------------------------------------------------------------------- sprites
 local spr = {}
 for name, rows in pairs(SPR) do spr[name] = G.compile(rows) end
+do
+  -- hostile army: black helmets, red uniforms
+  local function rc(rows, map) local o = {} for i, r in ipairs(rows) do o[i] = r:gsub(".", map) end return o end
+  spr.merc = G.compile(rc(SPR.soldier, { A = "D", D = "R", B = "D" }))
+  spr.merc_mg = G.compile(rc(SPR.mg_nest, { A = "D", S = "A", N = "D" }))
+  spr.armory = G.compile(rc(SPR.chest, { N = "D", B = "K", Y = "R" }))
+  spr.flag_red = G.compile(rc(SPR.flag, { C = "R", W = "K" }))
+end
 -- player shirt colour changes with prestige
 local PRESTIGE_SHIRT = { "U", "C", "g", "Y", "O", "R", "W", "A", "Z", "N", "Y" }
 local playerSpr = {}
@@ -151,6 +159,8 @@ local MOBS = {
   bomb_imp = { spr = "bomb_imp", hp = 7,   speed = 0.9,  dmg = 3, xp = 2,  score = 25,   r = 5,  unlock = 210, bomb = true, intro = "BOMB IMPS - keep your distance!" },
   boss     = { spr = "boss",     hp = 500, speed = 0.5,  dmg = 3, xp = 60, score = 1000, r = 11, heavy = true, boss = true },
   nest     = { spr = "nest",     hp = 90,  speed = 0,    dmg = 0, xp = 25, score = 300,  r = 9,  heavy = true, static = true },
+  merc     = { spr = "merc",     hp = 70,  speed = 0,    dmg = 0, xp = 8,  score = 200,  r = 5,  heavy = true, static = true, merc = true },
+  merc_mg  = { spr = "merc_mg",  hp = 280, speed = 0,    dmg = 0, xp = 25, score = 600,  r = 9,  heavy = true, static = true, merc = true, mg = true },
 }
 local SPAWN_ORDER = { "zombie", "ghoul", "brute", "skeleton", "bomb_imp" }
 local DEATH_COL = { zombie = S.Z, ghoul = S.A, brute = S.Z, skeleton = S.W, bomb_imp = S.R, boss = S.W }
@@ -365,7 +375,7 @@ local function newRun()
     outposts = {}, activeOutposts = {}, followers = {}, survivor = nil, nextSurvivor = 180 * TPS,
     rescued = 0, nestsCleared = 0,
     dmgSrc = {}, dmgTick = 0, dmgHist = {}, dmgSum = 0, dps = 0, nums = {},
-    corpses = {}, booms = {}, dyingT = 0, clouds = {},
+    corpses = {}, booms = {}, dyingT = 0, clouds = {}, bases = {}, mercs = {}, nearBases = 0,
   }
   owned = {}
   mobs, bullets, eshots, gems, pickups, parts, beams, strikes, fires, orbs = {}, {}, {}, {}, {}, {}, {}, {}, {}, {}
@@ -659,6 +669,7 @@ function C.killMob(m)
     m.numAcc = 0
   end
   R.kills = R.kills + 1
+  if m.baseKey then C.mercDown(m) end
   local rw = m.reward or 1
   R.soulPts = (R.soulPts or 0) + 0.1 * rw * C.soulDecay(m.bio or "plains")
   R.score = R.score + floor(m.def.score * (m.elite and 3 or 1) * rw)
@@ -800,12 +811,13 @@ function C.fire()
 
   -- fire rate beyond 1 volley per tick and shots that don't fit under the
   -- bullet cap are not lost: they turn into extra damage on what does fire
-  local desired = w.cd / stats.rate
+  local desired = w.cd / stats.rate / (R.inBase and 1.5 or 1)
   local over = 1
   if desired < 1 then over = 1 / desired; desired = 1 end
   local shots = max(1, min(proj, 240 - #bullets))
   over = over * proj / shots
   local fan = w.fan * (1 + (proj - w.proj) * 0.2)
+  if R.inBase then over = over * 1.5 end   -- captured base: guns hit harder
   local dmg = w.dmg * stats.gundmg * stats.wdmg * over
   for i = 1, shots do
     local a = baseA + (random() - 0.5) * w.jitter
@@ -962,8 +974,9 @@ function C.updateBullets()
       b.x = b.x + b.vx / steps
       b.y = b.y + b.vy / steps
       local target
+      if R.nearBases > 0 and world.wallHit(b.x, b.y, R.nearBaseList, R.nearBases) then dead = true; break end
       forNear(b.x, b.y + 6, 1, function(m)
-        if not b.hit[m] then
+        if not b.hit[m] and not (b.merc and m.def.merc) then
           local dx, dy = m.x - b.x, (m.y - 6) - b.y
           local r = m.def.r + 1
           if dx * dx + dy * dy <= r * r then target = m; return true end
@@ -1162,7 +1175,9 @@ function C.updateMobs()
       local d = m.def
       local dx, dy = p.x - m.x, p.y - m.y
       local dist = sqrt(dx * dx + dy * dy)
-      if d.static then
+      if d.merc then
+        C.updateMerc(m, s, dist)
+      elseif d.static then
         C.updateNest(m, s, dist)
       elseif dist > 460 then
         if d.boss then
@@ -1346,6 +1361,7 @@ function C.updateEShots()
     local e = eshots[i]
     e.x, e.y = e.x + e.vx, e.y + e.vy
     e.life = e.life - 1
+    if R.nearBases > 0 and world.wallHit(e.x, e.y, R.nearBaseList, R.nearBases) then e.life = 0 end
     local dx, dy = p.x - e.x, (p.y - 7) - e.y
     if dx * dx + dy * dy < 36 then
       local before = p.hp
@@ -1607,6 +1623,8 @@ function C.updatePickups()
         sfx("pick")
       elseif it.kind == "chest" then
         C.startPick("chest")
+      elseif it.kind == "armory" then
+        C.startPick("armory")
       end
     elseif it.ttl <= 0 then
       removeAt(pickups, i)
@@ -1720,6 +1738,10 @@ function C.startPick(kind)
   R.offerKind = kind
   R.banishMode = false
   R.offers = I.roll(owned, stats.luck, C.offerCount(), kind == "chest" and "epic" or nil, R.banned, nil, BIOME_FAVOR[R.biome or "plains"])
+  if kind == "armory" then
+    local mil = I.rollMilitary(owned, 3)
+    if #mil > 0 then R.offers = mil else R.offerKind = "chest" end
+  end
   R.pickT = 0
   if kind == "level" then ring(p.x, p.y - 6, 28, 22, S.Y, 2.2) end
   state = "pick"
@@ -1839,6 +1861,92 @@ function C.updateNest(m, s, dist)
       end
     end
     burst(m.x, m.y - 6, 5, S.Z, 1)
+  end
+end
+
+-- hostile army: shoots the player when in range, otherwise mows down zombies
+function C.updateMerc(m, s, dist)
+  if m.flash > 0 then m.flash = m.flash - 1 end
+  if m.burnT and m.burnT > 0 then
+    m.burnT = m.burnT - 1
+    if m.burnT % 10 == 0 then C.damageMob(m, m.burnP, nil, nil, false, "burn") end
+  end
+  if (m.frozenT or 0) > 0 then m.frozenT = m.frozenT - 1; return end
+  m.cd = m.cd - 1
+  if m.cd > 0 then return end
+  local mg = m.def.mg
+  local range = mg and 175 or 150
+  local ox, oy = m.x + (mg and 0 or 0), m.y - (mg and 8 or 9)
+  if dist < range and state == "play" and random() < 0.75 then
+    local tx, ty = p.x - ox, (p.y - 7) - oy
+    local l = max(0.01, sqrt(tx * tx + ty * ty))
+    local a = atan2(ty, tx) + (random() - 0.5) * (mg and 0.25 or 0.12)
+    eshots[#eshots + 1] = { x = ox, y = oy, vx = cos(a) * 4.2, vy = sin(a) * 4.2, life = 45,
+      dmg = (mg and 0.45 or 0.9) * mobDmg(s) * (m.bdmg or 1), kind = "merc" }
+    m.flip = tx < 0
+    if mg then
+      -- bursts of 8, then a reload pause (your window to move)
+      m.burst = (m.burst or 0) + 1
+      if m.burst >= 8 then m.burst = 0; m.cd = 45 else m.cd = 4 end
+    else
+      m.cd = random(26, 40)
+    end
+  else
+    local z = nearestMob(m.x, m.y, 140, R.mercs)
+    if z then
+      C.allyShot(ox, oy, z, 4 * hpMul(s), 0.1)
+      if bullets[#bullets] then bullets[#bullets].merc = true end
+      m.flip = z.x < m.x
+      m.cd = mg and 5 or random(14, 24)
+    else
+      m.cd = 10
+    end
+  end
+end
+
+local tmpBases = {}
+function C.updateBases(s)
+  R.nearBases = world.basesNear(p.x, p.y, 520, tmpBases)
+  R.nearBaseList = tmpBases
+  local ib = world.inBase(p.x, p.y)
+  R.inBase = ib and R.bases[ib.key] and R.bases[ib.key].captured or false
+  for i = 1, R.nearBases do
+    local b = tmpBases[i]
+    local st = R.bases[b.key]
+    if not st then st = { alive = 0 }; R.bases[b.key] = st end
+    if not st.spawned then
+      local dx, dy = p.x - b.x, p.y - b.y
+      if dx * dx + dy * dy < 430 * 430 then
+        st.spawned = true
+        local L = World.BASE_LAYOUT
+        local function add(kind, ofs)
+          local m = C.spawnMob(kind, b.x + ofs[1], b.y + ofs[2])
+          m.baseKey = b.key
+          R.mercs[m] = true
+          st.alive = st.alive + 1
+        end
+        for _, o in ipairs(L.mg) do add("merc_mg", o) end
+        for _, o in ipairs(L.soldiers) do add("merc", o) end
+        say("HOSTILE MILITARY BASE!  Capture it - the armory is worth it", 120, S.R)
+      end
+    end
+  end
+end
+
+function C.mercDown(m)
+  R.mercs[m] = nil
+  local st = R.bases[m.baseKey]
+  if not st then return end
+  st.alive = st.alive - 1
+  if st.alive <= 0 and not st.captured then
+    st.captured = true
+    local b
+    for i = 1, R.nearBases do if tmpBases[i].key == m.baseKey then b = tmpBases[i] end end
+    b = b or { x = m.x, y = m.y }
+    pickups[#pickups + 1] = { x = b.x, y = b.y + 6, kind = "armory", ttl = 99999 }
+    R.bonusSouls = (R.bonusSouls or 0) + 40
+    say("BASE CAPTURED!  Grab the armory chest  (+40 souls)", 120, S.Y)
+    sfx("level")
   end
 end
 
@@ -2055,6 +2163,7 @@ local function update()
   C.updatePickups()
   C.updateSpawns()
   C.updateOutposts(secs())
+  if R.tick % 5 == 0 then C.updateBases(secs()) end
   C.updateSurvivor(secs())
   C.updateFollowers(secs())
   C.updateFx()
@@ -2115,6 +2224,7 @@ end
 local camX, camY = 0, 0
 local drawList, nDraw = {}, 0
 
+local viewBaseList = {}
 local function addDraw(s_, x, y, flip, tint, z)
   nDraw = nDraw + 1
   local e = drawList[nDraw]
@@ -2256,6 +2366,14 @@ local function renderWorld()
   -- depth-sorted sprites
   nDraw = 0
   world.propsInView(camX, camY, PW, PH, addDraw)
+  -- military bases: crates + flag (red while hostile)
+  local nb = world.basesNear(camX + PW / 2, camY + PH / 2, PW, viewBaseList)
+  for i = 1, nb do
+    local b = viewBaseList[i]
+    for _, c in ipairs(World.BASE_LAYOUT.crates) do addDraw(spr.crate, b.x + c[1] - 4, b.y + c[2] - 7, false, nil, b.y + c[2]) end
+    local cap = R.bases[b.key] and R.bases[b.key].captured
+    addDraw(cap and spr.flag or spr.flag_red, b.x - 3, b.y - 24, false, nil, b.y - 12)
+  end
   if R.activeOutposts then
     for _, o in ipairs(R.activeOutposts) do
       if o.state == "alive" then
@@ -2419,7 +2537,11 @@ local function renderWorld()
   for _, e in ipairs(eshots) do
     local l = sqrt(e.vx * e.vx + e.vy * e.vy)
     local ux, uy = e.vx / l, e.vy / l
-    if e.kind == "bandage" then
+    if e.kind == "merc" then
+      scr.pixel(e.x - camX, e.y - camY, S.Y)
+      scr.pixel(e.x - ux - camX, e.y - uy - camY, S.O)
+      scr.pixel(e.x - ux * 2 - camX, e.y - uy * 2 - camY, S.O)
+    elseif e.kind == "bandage" then
       -- bandage: a wrapped strip with a line back to the mummy
       if e.from and not e.from.dead then
         local fx, fy = e.from.x, e.from.y - 8
@@ -2428,10 +2550,12 @@ local function renderWorld()
         for k = 0, d, 2 do scr.pixel(fx + dx / d * k - camX, fy + dy / d * k - camY, (floor(k / 2) % 2 == 0) and S.W or S.A) end
       end
     end
-    scr.pixel(e.x - camX, e.y - camY, S.A)
-    scr.pixel(e.x - ux - camX, e.y - uy - camY, S.B)
-    scr.pixel(e.x - ux * 2 - camX, e.y - uy * 2 - camY, S.B)
-    scr.pixel(e.x - ux * 3 - camX, e.y - uy * 3 - camY, S.W)
+    if e.kind ~= "merc" then
+      scr.pixel(e.x - camX, e.y - camY, S.A)
+      scr.pixel(e.x - ux - camX, e.y - uy - camY, S.B)
+      scr.pixel(e.x - ux * 2 - camX, e.y - uy * 2 - camY, S.B)
+      scr.pixel(e.x - ux * 3 - camX, e.y - uy * 3 - camY, S.W)
+    end
   end
   for _, o in ipairs(orbs) do
     local ox, oy = o.x - camX, o.y - camY
@@ -2607,6 +2731,7 @@ local function renderHUD()
   if stats.shield >= 1 then st[#st + 1] = { (p.shieldT >= C.shieldCd()) and "SHIELD" or "shield", (p.shieldT >= C.shieldCd()) and S.C or S.D } end
   if stats.revive >= 1 then st[#st + 1] = { "REVIVE " .. (floor(stats.revive + 0.5) - p.revUsed), S.Y } end
   if #R.followers > 0 then st[#st + 1] = { "ALLIES " .. #R.followers .. "/2", S.g } end
+  if R.inBase then st[#st + 1] = { "BASE: GUNS +50%", S.Y } end
   if (p.chillT or 0) > 0 then st[#st + 1] = { "CHILLED", S.C } end
   if (p.poisonT or 0) > 0 then st[#st + 1] = { "POISONED", S.g } end
   if (p.burnT or 0) > 0 then st[#st + 1] = { "BURNING", S.O } end
@@ -2679,11 +2804,13 @@ local function ownedList()
   return L
 end
 
-local RARFRAME = { common = S.A, rare = S.C, epic = S.O, legendary = S.Y }
+local RARFRAME = { common = S.A, rare = S.C, epic = S.O, legendary = S.Y, military = S.R }
 local ITEMART, itemSpr = require("dz.itemicons"), {}
 local function itemSprite(id)
   if itemSpr[id] == nil then
-    local art = ITEMART[id]
+    local ALIAS = { m_belt = "hell", m_rounds = "ap", m_drum = "barrel", m_armor = "bulwark", m_target = "marks",
+      m_medic = "bandage", m_uplink = "midas" }
+    local art = ITEMART[id] or ITEMART[ALIAS[id] or ""]
     if art then
       -- drawn at 2x: every text cell then holds at most 2 art pixels (2 colours), so nothing gets lost
       local big = {}
@@ -2702,7 +2829,7 @@ local function drawPickCard(it, i, x0, y0, w, h)
   local rar = I.RARITY[it.rarity]
   local rc = P.slot[rar.col]
   local fc = R.banishMode and ((frame % 10 < 5) and S.R or S.D) or RARFRAME[it.rarity]
-  local legend = it.rarity == "legendary"
+  local legend = it.rarity == "legendary" or it.rarity == "military"
   local px0, py0 = (x0 - 1) * 2, (y0 - 1) * 3
   local pw, ph = w * 2, h * 3
   -- face: pixel area for the icon, the pips and the divider; the rest is text
@@ -2791,6 +2918,7 @@ local function renderPick()
   local word, sub, col, colTop
   if R.banishMode then word, sub, col, colTop = "BANISH", "which item? gone for this run", S.R, S.O
   elseif R.offerKind == "chest" then word, sub, col, colTop = "TREASURE!", "pick a reward", S.Y, S.W
+  elseif R.offerKind == "armory" then word, sub, col, colTop = "ARMORY", "captured base - pick one, no drawbacks", S.R, S.O
   elseif R.offerKind == "bonus" then word, sub, col, colTop = "HEAD START", "free pick", S.C, S.W
   else word, sub, col, colTop = "LEVEL UP!", "level " .. (p.level - p.pending + 1), S.Y, S.W end
   local fav = FAVOR_NAME[R.biome or "plains"]
@@ -2812,8 +2940,8 @@ local function renderPick()
     if cy + off <= CH then drawPickCard(it, i, x0, cy + off, cardW, cardH) end
   end
   local keysTxt = (n == 4) and "1 2 3 4  pick" or "1 2 3  pick"
-  if R.rerolls > 0 then keysTxt = keysTxt .. "      R reroll (" .. R.rerolls .. ")" end
-  if R.banishes > 0 then keysTxt = keysTxt .. "      B banish (" .. R.banishes .. ")" end
+  if R.rerolls > 0 and R.offerKind ~= "armory" then keysTxt = keysTxt .. "      R reroll (" .. R.rerolls .. ")" end
+  if R.banishes > 0 and R.offerKind ~= "armory" then keysTxt = keysTxt .. "      B banish (" .. R.banishes .. ")" end
   center(cy + cardH + 1, " " .. keysTxt .. " ", S.W, S.K)
 end
 
@@ -3187,11 +3315,11 @@ local function onKey(k)
   elseif state == "pick" then
     local n = NUM[k]
     if n and n <= #R.offers then C.choose(n)
-    elseif k == keys.r and R.rerolls > 0 and not R.banishMode then
+    elseif k == keys.r and R.rerolls > 0 and not R.banishMode and R.offerKind ~= "armory" then
       R.rerolls = R.rerolls - 1
       R.offers = I.roll(owned, stats.luck, C.offerCount(), R.offerKind == "chest" and "epic" or nil, R.banned, nil, BIOME_FAVOR[R.biome or "plains"])
       R.pickT = 0
-    elseif k == keys.b and R.banishes > 0 then
+    elseif k == keys.b and R.banishes > 0 and R.offerKind ~= "armory" then
       R.banishMode = not R.banishMode
     end
   elseif state == "paused" then

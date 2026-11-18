@@ -17,6 +17,7 @@ I.RARITY = {
   rare      = { name = "RARE",      col = "C", weight = 28 },
   epic      = { name = "EPIC",      col = "O", weight = 10 },
   legendary = { name = "LEGENDARY", col = "Y", weight = 2.5 },
+  military  = { name = "MILITARY",  col = "R", weight = 0 },
 }
 I.RARITY_ORDER = { "common", "rare", "epic", "legendary" }
 
@@ -161,7 +162,28 @@ I.FILLERS = {
   { id = "shard_area", name = "Rune Shard",   rarity = "common", max = 999, mods = { aoedmg_pct = 0.05 }, lines = { "+5% area damage", "(endless)" } },
 }
 
+-- capture rewards from hostile military bases: no drawbacks, very strong
+I.MILITARY = {
+  { id = "m_belt",   name = "Belt-fed Kit",       rarity = "military", max = 1, mods = { rate_x = 2 },               lines = { "x2 fire rate, all weapons" } },
+  { id = "m_rounds", name = "Black Ops Rounds",   rarity = "military", max = 1, mods = { gundmg_x = 2, pierce = 2 }, lines = { "x2 gun damage", "+2 pierce" } },
+  { id = "m_drum",   name = "Drum Magazines",     rarity = "military", max = 1, mods = { proj = 3 },                 lines = { "+3 projectiles, all weapons" } },
+  { id = "m_armor",  name = "Spec-Ops Armor",     rarity = "military", max = 1, mods = { armor = 4, maxhp = 5 },     lines = { "+4 armor", "+50 max HP" }, heal = 5 },
+  { id = "m_target", name = "Targeting Computer", rarity = "military", max = 1, mods = { crit = 0.25, critdmg = 1 }, lines = { "+25% crit chance", "+100% crit damage" } },
+  { id = "m_medic",  name = "Field Medic Kit",    rarity = "military", max = 1, mods = { regen = 4, lifesteal = 0.02 }, lines = { "+40 HP every 10s", "Heal 2% of damage dealt" } },
+  { id = "m_uplink", name = "Command Uplink",     rarity = "military", max = 1, mods = { dmg_x = 1.5, xp_pct = 0.25 }, lines = { "x1.5 all damage", "+25% XP" } },
+}
+function I.rollMilitary(owned, n)
+  local pool, out = {}, {}
+  for _, it in ipairs(I.MILITARY) do if (owned[it.id] or 0) < it.max then pool[#pool + 1] = it end end
+  while #out < n and #pool > 0 do out[#out + 1] = table.remove(pool, math.random(#pool)) end
+  return out
+end
+
 I.byId = { snack = I.SNACK }
+for _, it in ipairs(I.MILITARY) do
+  I.byId[it.id] = it
+  it.parsed = parseMods(it.mods, "military " .. it.id)
+end
 for id, list in pairs(NEEDS) do
   for _, it in ipairs(I.LIST) do
     if it.id == id then it.needsAny = list end

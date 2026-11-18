@@ -18,6 +18,10 @@ local DECO_GRID = 8
 local LW, LH = 360, 300           -- one lake chance per region of this size
 local OW, OH = 640, 520           -- one outpost chance per region of this size
 local BLK = 8                     -- biome lookup block size (pixels)
+local MBW, MBH = 2400, 2400       -- one military base chance per region of this size
+local BASE_HW, BASE_HH = 130, 95  -- half size of a base compound
+local WALL = 6                    -- wall thickness
+local GATE = 22                   -- half width of a gate
 
 -- Biomes come from two smooth noise maps, temperature and humidity (like
 -- Minecraft). Temperature changes gradually, so cold and hot biomes always
@@ -245,7 +249,7 @@ function W.new(spr, seed)
         local name = list[1 + floor(hash(gx, gy, 3) * #list)]
         -- the last two entries are the rare ones
         if r > bd.deco * 0.025 and (name == list[4] or name == list[5]) then name = list[1 + floor(hash(gx, gy, 4) * 3)] end
-        if waterEdge(x, y) > 4 then d = { decoSpr(name), x, y } end
+        if waterEdge(x, y) > 4 and not self.nearBase(x, y, 4) then d = { decoSpr(name), x, y } end
       end
       row[gx] = d
     end
@@ -272,8 +276,43 @@ function W.new(spr, seed)
   end
   local ice = G.pattern({ s.C, s.C, s.C, s.C, s.C, s.C })
 
+  local basePattern
   local viewLakes = {}
   local bgrid, ugrid, colIdx, rowIdx = {}, {}, {}, {}
+  local viewBases, nvb = {}, 0
+  -- concrete floor with tile seams, walls dark with a light top edge
+  -- each base is rasterised once into a colour table (walls, floor, seams)
+  local function rasterise(b)
+    local r, bw = {}, b.x1 - b.x0
+    for yy = 0, b.y1 - b.y0 - 1 do
+      for xx = 0, bw - 1 do
+        local x, y = b.x0 + xx, b.y0 + yy
+        local c = ((xx % 24 == 0) or (yy % 24 == 0)) and s.D or s.A
+        for _, w in ipairs(b.walls) do
+          if x >= w[1] and x < w[3] and y >= w[2] and y < w[4] then
+            c = (y == w[2] or y == w[2] + 1) and s.A or (((x + y) % 7 == 0) and s.K or s.D)
+            break
+          end
+        end
+        r[yy * bw + xx] = c
+      end
+    end
+    b.raster, b.bw = r, bw
+  end
+  local function basePix(b, x, y)
+    if x < b.x0 or x >= b.x1 or y < b.y0 or y >= b.y1 then return groundCol[biomeAt(x, y)] end
+    return b.raster[(y - b.y0) * b.bw + (x - b.x0)]
+  end
+  function basePattern(b, wx, wy)
+    if not b.raster then rasterise(b); b.pcache = {} end
+    local k = (wy - b.y0 + 4) * 1024 + (wx - b.x0 + 4)
+    local pt = b.pcache[k]
+    if pt then return pt end
+    pt = shorePattern(basePix(b, wx, wy), basePix(b, wx + 1, wy), basePix(b, wx, wy + 1),
+      basePix(b, wx + 1, wy + 1), basePix(b, wx, wy + 2), basePix(b, wx + 1, wy + 2))
+    b.pcache[k] = pt
+    return pt
+  end
   function self.drawGround(scr, camX, camY)
     -- lakes overlapping the view
     local nv = 0
@@ -308,6 +347,15 @@ function W.new(spr, seed)
         end
       end
     end
+    -- bases actually overlapping the screen
+    local nb = self.basesNear(camX + scr.PW / 2, camY + scr.PH / 2, scr.PW, viewBases)
+    nvb = 0
+    for i = 1, nb do
+      local b = viewBases[i]
+      if b.x1 > camX and b.x0 < camX + scr.PW and b.y1 > camY and b.y0 < camY + scr.PH then
+        nvb = nvb + 1; viewBases[nvb] = b
+      end
+    end
     -- whole view inside one biome: every cell is the same pattern
     local only = ugrid[2 * nbx + 2]
     if only then
@@ -318,15 +366,18 @@ function W.new(spr, seed)
         if not only then break end
       end
     end
+    if nvb > 0 then only = nil end
     for cx = 0, scr.CW - 1 do colIdx[cx] = floor((camX + cx * 2 + 1) / BLK) - bx0 end
     for cy = 0, scr.CH - 1 do rowIdx[cy] = (floor((camY + cy * 3 + 1) / BLK) - by0) * nbx end
     local function land(wx, wy, cx, cy)
+      for i = 1, nvb do
+        local b = viewBases[i]
+        if wx + 2 > b.x0 and wx < b.x1 and wy + 3 > b.y0 and wy < b.y1 then return basePattern(b, wx, wy) end
+      end
       local u = only or ugrid[rowIdx[cy] + colIdx[cx]]
       if u then return u end
-      return shorePattern(
-        groundCol[biomeJit(wx, wy)], groundCol[biomeJit(wx + 1, wy)],
-        groundCol[biomeJit(wx, wy + 1)], groundCol[biomeJit(wx + 1, wy + 1)],
-        groundCol[biomeJit(wx, wy + 2)], groundCol[biomeJit(wx + 1, wy + 2)])
+      -- border: one jittered lookup per cell (ragged edge at cell size, cheap)
+      return groundPat[biomeJit(wx + 1, wy + 1)]
     end
     if nv == 0 and only then
       scr.fillBase(function() return only end)
@@ -411,7 +462,7 @@ function W.new(spr, seed)
         else
           bx, by, br = x + sp.w / 2, y + sp.h - 2, (kind == "oak" or kind == "snowoak") and 3 or 2
         end
-        if bx * bx + by * by > 70 * 70 and waterEdge(bx, by) > 12 and not self.nearOutpost(bx, by, 60) then
+        if bx * bx + by * by > 70 * 70 and waterEdge(bx, by) > 12 and not self.nearOutpost(bx, by, 60) and not self.nearBase(bx, by, 30) then
           pr = { spr = sp, x = x, y = y, bx = bx, by = by, br = br, z = y + sp.h }
         end
       end
@@ -436,7 +487,7 @@ function W.new(spr, seed)
     if hash(ox, oy, 21) >= 0.45 then return nil end
     local x = ox * OW + 90 + floor(hash(ox, oy, 22) * (OW - 180))
     local y = oy * OH + 90 + floor(hash(ox, oy, 23) * (OH - 180))
-    if x * x + y * y <= 300 * 300 or waterEdge(x, y) <= 50 then return nil end
+    if x * x + y * y <= 300 * 300 or waterEdge(x, y) <= 50 or self.nearBase(x, y, 200) then return nil end
     return x, y
   end
   local MIN_GAP = 450   -- camps never closer than this to each other
@@ -493,6 +544,76 @@ function W.new(spr, seed)
     return n
   end
 
+  -- military bases ------------------------------------------------------------
+  -- rare walled compounds: walls with gates W, E and S, concrete inside.
+  -- layout positions are relative to the centre.
+  W.BASE_LAYOUT = {
+    mg = { { -BASE_HW + 24, -BASE_HH + 22 }, { BASE_HW - 24, -BASE_HH + 22 } },
+    soldiers = { { -70, -30 }, { -30, -55 }, { 30, -55 }, { 70, -30 }, { -80, 40 }, { -35, 55 }, { 35, 55 }, { 80, 40 } },
+    crates = { { -100, 0 }, { 96, 4 }, { -10, -70 }, { 14, 70 }, { -56, 10 }, { 60, -4 } },
+  }
+  local baseCache = {}
+  local function baseAt(bx, by)
+    local key = bx * 65536 + by
+    local b = baseCache[key]
+    if b ~= nil then return b end
+    b = false
+    if hash(bx, by, 501) < 0.45 then
+      local x = bx * MBW + 320 + floor(hash(bx, by, 502) * (MBW - 640))
+      local y = by * MBH + 320 + floor(hash(bx, by, 503) * (MBH - 640))
+      if x * x + y * y > 1800 * 1800 and waterEdge(x, y) > 220 then
+        local x0, y0, x1, y1 = x - BASE_HW, y - BASE_HH, x + BASE_HW, y + BASE_HH
+        b = { key = key, x = x, y = y, x0 = x0, y0 = y0, x1 = x1, y1 = y1, walls = {
+          { x0, y0, x1, y0 + WALL },                                        -- north
+          { x0, y1 - WALL, x - GATE, y1 }, { x + GATE, y1 - WALL, x1, y1 },   -- south + gate
+          { x0, y0, x0 + WALL, y - GATE }, { x0, y + GATE, x0 + WALL, y1 },   -- west + gate
+          { x1 - WALL, y0, x1, y - GATE }, { x1 - WALL, y + GATE, x1, y1 },   -- east + gate
+        } }
+      end
+    end
+    baseCache[key] = b
+    return b
+  end
+  function self.basesNear(x, y, range, out)
+    local n = 0
+    local bx, by = floor(x / MBW), floor(y / MBH)
+    for yy = by - 1, by + 1 do
+      for xx = bx - 1, bx + 1 do
+        local b = baseAt(xx, yy)
+        if b and x > b.x0 - range and x < b.x1 + range and y > b.y0 - range and y < b.y1 + range then
+          n = n + 1; out[n] = b
+        end
+      end
+    end
+    for i = n + 1, #out do out[i] = nil end
+    return n
+  end
+  local tmpBases = {}
+  function self.nearBase(x, y, range)
+    if self.basesNear(x, y, range, tmpBases) > 0 then return tmpBases[1] end
+    return nil
+  end
+  -- base whose walls enclose (x, y)
+  function self.inBase(x, y)
+    local b = self.nearBase(x, y, 0)
+    if b and x > b.x0 + WALL and x < b.x1 - WALL and y > b.y0 + WALL and y < b.y1 - WALL then return b end
+    return nil
+  end
+  local hitBases = {}
+  -- list/n: optional bases already looked up nearby (saves time for bullets)
+  function self.wallHit(x, y, list, n)
+    if not list then list = hitBases; n = self.basesNear(x, y, 2, hitBases) end
+    for i = 1, n do
+      local b = list[i]
+      if x >= b.x0 and x < b.x1 and y >= b.y0 and y < b.y1 then
+      for _, w in ipairs(b.walls) do
+        if x >= w[1] and x < w[3] and y >= w[2] and y < w[4] then return true end
+      end
+      end
+    end
+    return false
+  end
+
   -- collision: push a circle (x, y, r) out of props and water ----------------
   local pushLakes = {}
   function self.pushOut(x, y, r)
@@ -509,6 +630,26 @@ function W.new(spr, seed)
             if d < 0.01 then dx, dy, d = 1, 0, 1 end
             x = pr.bx + dx / d * m
             y = pr.by + dy / d * m
+          end
+        end
+      end
+    end
+    local nb = self.basesNear(x, y, r + 2, hitBases)
+    for i = 1, nb do
+      for _, w in ipairs(hitBases[i].walls) do
+        -- circle vs rectangle
+        local cx, cy = max(w[1], min(x, w[3])), max(w[2], min(y, w[4]))
+        local dx, dy = x - cx, y - cy
+        local d2 = dx * dx + dy * dy
+        if d2 < r * r then
+          if d2 < 0.0001 then
+            -- centre inside the wall: push out the short way
+            local l, rr, t, bb = x - w[1], w[3] - x, y - w[2], w[4] - y
+            local m = min(l, rr, t, bb)
+            if m == l then x = w[1] - r elseif m == rr then x = w[3] + r elseif m == t then y = w[2] - r else y = w[4] + r end
+          else
+            local d = sqrt(d2)
+            x, y = cx + dx / d * r, cy + dy / d * r
           end
         end
       end
