@@ -2,9 +2,16 @@
 
 local N = {}
 
-N.VERSION = "v3.30"
+N.VERSION = "v3.31"
 
 N.LIST = {
+  { "v3.31", "Easier to find bases and cemeteries", {
+    "About 3x more military bases, about 2x more cemeteries",
+    "  (typical walk: ~2.5 min to a base, ~5 min to a cemetery)",
+    "Within ~3 screens you hear them: GUNFIRE / A BELL TOLLS + direction",
+    "A red flag (base) or skull (cemetery) marks them on the screen edge",
+    "  until the base is captured / the cemetery cleared",
+  } },
   { "v3.30", "Fortress - the turtle build", {
     "New FORTRESS family: saws, aura, thorns, Spiked Armor, Iron Maiden,",
     "  Plague Heart, Juggernaut, Armor Plate + the new tank items",

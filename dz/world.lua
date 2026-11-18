@@ -18,11 +18,11 @@ local DECO_GRID = 8
 local LW, LH = 360, 300           -- one lake chance per region of this size
 local OW, OH = 640, 520           -- one outpost chance per region of this size
 local BLK = 8                     -- biome lookup block size (pixels)
-local MBW, MBH = 2400, 2400       -- one military base chance per region of this size
+local MBW, MBH = 1500, 1500       -- one military base chance per region of this size
 local BASE_HW, BASE_HH = 130, 95  -- half size of a base compound
 local WALL = 6                    -- wall thickness
 local GATE = 22                   -- half width of a gate
-local CMW, CMH = 3200, 3200       -- one cemetery chance per region of this size
+local CMW, CMH = 2000, 2000       -- one cemetery chance per region of this size
 local CEM_HW, CEM_HH = 118, 88
 
 -- Biomes come from two smooth noise maps, temperature and humidity (like
@@ -581,7 +581,7 @@ function W.new(spr, seed)
     local b = baseCache[key]
     if b ~= nil then return b end
     b = false
-    if hash(bx, by, 501) < 0.45 then
+    if hash(bx, by, 501) < 0.55 then
       local x = bx * MBW + 320 + floor(hash(bx, by, 502) * (MBW - 640))
       local y = by * MBH + 320 + floor(hash(bx, by, 503) * (MBH - 640))
       if x * x + y * y > 1800 * 1800 and waterEdge(x, y) > 220 then
@@ -609,7 +609,7 @@ function W.new(spr, seed)
     local c = cemCache[key]
     if c ~= nil then return c end
     c = false
-    if hash(cx, cy, 601) < 0.35 then
+    if hash(cx, cy, 601) < 0.6 then
       local x = cx * CMW + 300 + floor(hash(cx, cy, 602) * (CMW - 600))
       local y = cy * CMH + 300 + floor(hash(cx, cy, 603) * (CMH - 600))
       if x * x + y * y > 2500 * 2500 and waterEdge(x, y) > 200 then
@@ -618,7 +618,7 @@ function W.new(spr, seed)
         local bx, by = floor(x / MBW), floor(y / MBH)
         for yy = by - 1, by + 1 do for xx = bx - 1, bx + 1 do
           local b = baseAt(xx, yy)
-          if b and (b.x - x) ^ 2 + (b.y - y) ^ 2 < 700 * 700 then ok = false end
+          if b and (b.x - x) ^ 2 + (b.y - y) ^ 2 < 600 * 600 then ok = false end
         end end
         if ok then
           local x0, y0, x1, y1 = x - CEM_HW, y - CEM_HH, x + CEM_HW, y + CEM_HH

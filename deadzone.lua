@@ -293,6 +293,8 @@ local SOUNDS = {
   shield = { 8, function() speaker.playNote("iron_xylophone", 0.6, 20) end },
   buy   = { 2,  function() speaker.playNote("pling", 0.7, 16) end },
   login = { 5,  function() speaker.playSound("entity.player.levelup", 0.5, 1.5) end },
+  bell  = { 20, function() speaker.playSound("block.bell.use", 0.8, 0.7) end },
+  gunfire = { 20, function() speaker.playSound("entity.firework_rocket.blast", 0.8, 0.6) end },
 }
 local function sfx(kind)
   if not speaker then return end
@@ -2102,6 +2104,28 @@ end
 
 local tmpBases = {}
 function C.updateBases(s)
+  -- sites within ~3 screens: a one-time sound cue + an edge marker until cleared
+  if R.tick % 20 == 0 then
+    R.sigTmp = R.sigTmp or {}
+    R.siteHints = R.siteHints or {}
+    R.siteSaid = R.siteSaid or {}
+    local hints = R.siteHints
+    for i = #hints, 1, -1 do hints[i] = nil end
+    local n = world.basesNear(p.x, p.y, 1000, R.sigTmp)
+    for i = 1, n do
+      local b = R.sigTmp[i]
+      local st = R.bases[b.key]
+      if not (st and st.captured) then
+        hints[#hints + 1] = b
+        if not R.siteSaid[b.key] and not (st and st.spawned) then
+          R.siteSaid[b.key] = true
+          local dir = C.dirName(b.x - p.x, b.y - p.y)
+          if b.kind == "base" then say("GUNFIRE TO THE " .. dir .. "  -  a military base is near", 120, S.O); sfx("gunfire")
+          else say("A BELL TOLLS TO THE " .. dir .. "  -  a cursed cemetery is near", 120, S.A); sfx("bell") end
+        end
+      end
+    end
+  end
   R.nearBases = world.basesNear(p.x, p.y, 520, tmpBases)
   R.nearBaseList = tmpBases
   local ib = world.inBase(p.x, p.y)
@@ -2149,6 +2173,13 @@ function C.updateBases(s)
       end
     end
   end
+end
+
+-- 8-way compass word for a direction (screen y grows south)
+function C.dirName(dx, dy)
+  local a = math.atan2 and math.atan2(dy, dx) or math.atan(dy, dx)
+  local k = floor((a / (2 * pi)) * 8 + 8.5) % 8
+  return ({ "EAST", "SOUTH-EAST", "SOUTH", "SOUTH-WEST", "WEST", "NORTH-WEST", "NORTH", "NORTH-EAST" })[k + 1]
 end
 
 function C.mercDown(m)
@@ -2766,6 +2797,17 @@ function V.renderWorld()
         if fx < 0 or fx > PW or fy < 0 or fy > PH then
           scr.sprite(spr.flag, max(3, min(PW - 9, fx)), max(10, min(PH - 16, fy)))
         end
+      end
+    end
+  end
+  -- military bases / cemeteries nearby: red flag or skull on the screen edge
+  if R.siteHints and frame % 20 < 14 then
+    for _, b in ipairs(R.siteHints) do
+      local fx, fy = b.x - camX, b.y - 10 - camY
+      if fx < 0 or fx > PW or fy < 12 or fy > PH then
+        fx, fy = max(3, min(PW - 9, fx)), max(14, min(PH - 22, fy))
+        if b.kind == "base" then scr.sprite(spr.flag_red, fx, fy)
+        else scr.rect(fx - 1, fy - 1, 9, 8, S.K); scr.sprite(spr.hud_skull, fx, fy) end
       end
     end
   end
