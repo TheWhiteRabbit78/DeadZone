@@ -2,9 +2,15 @@
 
 local N = {}
 
-N.VERSION = "v3.31"
+N.VERSION = "v3.32"
 
 N.LIST = {
+  { "v3.32", "Android version", {
+    "DEAD ZONE now also runs as an Android app (LÖVE), same game",
+    "  touch: left stick moves, right stick aims + shoots,",
+    "  tap a card to pick it, buttons for pause / menus",
+    "On the server: right-click a level-up card on the monitor to pick it",
+  } },
   { "v3.31", "Easier to find bases and cemeteries", {
     "About 3x more military bases, about 2x more cemeteries",
     "  (typical walk: ~2.5 min to a base, ~5 min to a cemetery)",

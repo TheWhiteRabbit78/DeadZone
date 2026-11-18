@@ -3352,6 +3352,8 @@ function V.renderPick()
     if t < 10 then off = floor(((10 - max(0, t)) / 10) ^ 2 * (CH - cy + 2)) end
     local x0 = floor((CW - total) / 2) + 1 + (i - 1) * (cardW + 3)
     if cy + off <= CH then V.drawPickCard(it, i, x0, cy + off, cardW, cardH) end
+    UI.cardRects = UI.cardRects or {}
+    UI.cardRects[i] = { x0, cy, x0 + cardW - 1, cy + cardH - 1 }
   end
   local keysTxt = (n == 4) and "1 2 3 4  pick" or "1 2 3  pick"
   if R.rerolls > 0 and R.offerKind ~= "armory" then keysTxt = keysTxt .. "      R reroll (" .. R.rerolls .. ")" end
@@ -3668,6 +3670,7 @@ end
 
 local MENU = { title = true, naming = true, notes = true, dead = true, tree = true }
 local function render()
+  _G.DZ_STATE = state   -- lets a touch front-end (LÖVE port) show the right buttons
   if MENU[state] then
     if P.current ~= "night" then P.use("night"); P.apply(out) end
     UI.tbg = FACE
@@ -3764,6 +3767,16 @@ local function onKey(k)
   end
 end
 
+-- touch / click on the game picture (monitor right-click in CC, finger on a phone)
+function V.onTouch(x, y)
+  if state == "pick" and R.offers and (R.pickT or 0) >= 16 then   -- ignore taps while the cards deal in
+    for i = 1, #R.offers do
+      local r = UI.cardRects and UI.cardRects[i]
+      if r and x >= r[1] and x <= r[3] and y >= r[2] and y <= r[4] then C.choose(i) return end
+    end
+  end
+end
+
 ---------------------------------------------------------------------- controller screen (computer)
 function V.drawController()
   if out == native then return end
@@ -3833,6 +3846,8 @@ local function main()
       if not ev[3] then onKey(ev[2]) end
     elseif e == "key_up" then
       held[ev[2]] = nil
+    elseif (e == "mouse_click" and out == native) or (e == "monitor_touch" and out ~= native) then
+      V.onTouch(ev[3], ev[4])
     elseif e == "char" and state == "naming" then
       if #UI.nameBuf < 16 and ev[2]:match("[%w_%-]") then UI.nameBuf = UI.nameBuf .. ev[2] end
     elseif e == "playerClick" then
