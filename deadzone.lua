@@ -201,6 +201,21 @@ local BIOME = {
   frozenbog  = { danger = 4, hp = 2.8,  dmg = 1.8, reward = 2.8,  col = S.C, mod = { frost = 1.5, fire = 0.5 }, move = 0.8 },
   badlands   = { danger = 4, hp = 2.8,  dmg = 1.8, reward = 2.8,  col = S.O, mod = { fire = 1.5, frost = 0.5 }, heat = 2 },
 }
+-- biome-themed upgrade odds (x3 for the biome's families / items)
+local FROSTY = { frost = 3 }
+local BIOME_FAVOR = {
+  forest = { saw = 3, spike = 3, sawstorm = 3, maiden = 3, thorns = 3 },
+  swamp = { lightning = 3, aura = 3, plague = 3 },
+  jungle = { arcane = 3, aura = 2 },
+  desert = { fire = 3 },
+  badlands = { fire = 2, explosive = 3 },
+  tundra = FROSTY, snowforest = FROSTY, frozenbog = { frost = 3, arcane = 2 },
+}
+local FAVOR_NAME = { forest = "SAWS + THORNS", swamp = "LIGHTNING + POISON", jungle = "ARCANE", desert = "FIRE",
+  badlands = "FIRE + EXPLOSIVE", tundra = "FROST", snowforest = "FROST", frozenbog = "FROST + ARCANE" }
+-- souls shrink the longer you stay in an easy biome (floor reached after 10 min there)
+local SOUL_FLOOR = { 0.25, 0.5, 0.75, 1 }
+
 local COLD_SET = { zombie = "frost_zombie", ghoul = "frost_ghoul", brute = "yeti", skeleton = "ice_archer", bomb_imp = "frost_imp" }
 local ROSTER = {
   forest = { zombie = "woods_zombie", ghoul = "wolf" },
@@ -330,7 +345,7 @@ local function newRun()
   }
   R = {
     tick = 0, kills = 0, score = 0, bossKills = 0,
-    spawnTimer = 20, nextHorde = 60 * TPS, nextBoss = 180 * TPS, boss = nil,
+    spawnTimer = 40, nextHorde = 90 * TPS, nextBoss = 180 * TPS, boss = nil,
     announced = { zombie = true }, rerolls = 0, banishes = 0, banned = {},
     offers = nil, offerKind = nil, banishMode = false,
     deadTimer = 0, newBest = false, soulsEarned = 0, mult = 1, res = 0, nextSwarm = 360 * TPS, boomQ = {},
@@ -633,7 +648,7 @@ function C.killMob(m)
   end
   R.kills = R.kills + 1
   local rw = m.reward or 1
-  R.bonusKills = (R.bonusKills or 0) + (rw - 1)
+  R.soulPts = (R.soulPts or 0) + 0.1 * rw * C.soulDecay(m.bio or "plains")
   R.score = R.score + floor(m.def.score * (m.elite and 3 or 1) * rw)
   C.dropGem(m.x, m.y - 4, m.def.xp * (1 + secs() / 400) * (m.elite and 4 or 1) * rw)
   burst(m.x, m.y - 6, 8, DEATH_COL[m.kind] or S.R, 1.4)
@@ -685,15 +700,24 @@ end
 function C.spawnMob(kind, x, y)
   local bio = world.biomeAt(x, y)
   local B = BIOME[bio] or BIOME.plains
+  local s = secs()
+  local hpB, dmgB = B.hp, B.dmg
+  if bio == "plains" then
+    -- plains: only zombies, ghouls (1:30+) and brutes (5:00+), but they toughen up over time
+    if kind == "skeleton" or kind == "bomb_imp" then kind = (s >= 90 and random() < 0.4) and "ghoul" or "zombie" end
+    if kind == "ghoul" and s < 90 then kind = "zombie" end
+    if kind == "brute" and s < 300 then kind = "zombie" end
+    local t = max(0, min(1, (s - 120) / 480))
+    hpB, dmgB = 1 + 0.5 * t, 1 + 0.25 * t
+  end
   local roster = ROSTER[bio]
   if roster and roster[kind] then kind = roster[kind] end
   local d = MOBS[kind]
-  local s = secs()
   local m = {
     kind = kind, def = d, x = x, y = y,
-    hp = d.hp * hpMul(s) * B.hp, speed = d.speed * speedMul(s) * (0.9 + random() * 0.2),
+    hp = d.hp * hpMul(s) * hpB, speed = d.speed * speedMul(s) * (0.9 + random() * 0.2),
     flash = 0, cd = random(30, 70), phase = random(0, 11), flip = false,
-    bdmg = B.dmg, reward = B.reward,
+    bdmg = dmgB, reward = B.reward, bio = bio,
   }
   if not d.boss and not d.static and kind ~= "bomb_imp" and random() < eliteChance(s) then
     m.elite = true
@@ -986,6 +1010,15 @@ function C.biomeText(b)
   return table.concat(t, "  ")
 end
 
+-- soul multiplier for kills / time in a biome: starts at the biome's reward and
+-- drops the longer you stay; easy biomes drop to x0.25 of that after 10 min
+function C.soulDecay(b)
+  local B = BIOME[b] or BIOME.plains
+  local mins = ((R.bTime and R.bTime[b]) or 0) / 60
+  local floorV = SOUL_FLOOR[B.danger] or 1
+  return B.reward * max(floorV, 1 - (1 - floorV) * mins / 10)
+end
+
 function C.enterBiome(b)
   local B = BIOME[b] or BIOME.plains
   R.biome = b
@@ -1002,6 +1035,11 @@ end
 
 function C.updateDebuffs()
   local mh = p.maxHp
+  -- time spent per biome (soul decay) + souls for surviving: 5 per minute x biome
+  R.bTime = R.bTime or {}
+  local bb = R.biome or "plains"
+  R.bTime[bb] = (R.bTime[bb] or 0) + 1 / TPS
+  R.soulPts = (R.soulPts or 0) + (5 / 60 / TPS) * C.soulDecay(bb)
   if (p.chillT or 0) > 0 then p.chillT = p.chillT - 1 end
   if (p.poisonT or 0) > 0 then
     p.poisonT = p.poisonT - 1
@@ -1532,7 +1570,7 @@ function C.updateSpawns()
 
   R.spawnTimer = R.spawnTimer - 1
   if R.spawnTimer <= 0 then
-    R.spawnTimer = max(5, floor((34 - s / 10) / stats.spawn))
+    R.spawnTimer = max(5, floor((34 - s / 10 + max(0, 120 - s) / 5) / stats.spawn))
     local batch = 1 + floor(s / 90)
     for _ = 1, batch do
       if #mobs < mobCap(s) then
@@ -1545,7 +1583,7 @@ function C.updateSpawns()
   if R.tick >= R.nextHorde then
     R.nextHorde = R.nextHorde + 60 * TPS
     say("A HORDE APPROACHES!", 70, S.R)
-    for _ = 1, 16 + floor(s / 30) * 2 do
+    for _ = 1, ((s < 180) and 8 or 16) + floor(s / 30) * 2 do
       if #mobs < mobCap(s) + 40 then
         local x, y = C.spawnPos()
         if x then C.spawnMob((s >= 40 and random() < 0.35) and "ghoul" or "zombie", x, y) end
@@ -1609,7 +1647,7 @@ function C.offerCount() return max(3, min(4, floor(stats.choices + 0.5))) end
 function C.startPick(kind)
   R.offerKind = kind
   R.banishMode = false
-  R.offers = I.roll(owned, stats.luck, C.offerCount(), kind == "chest" and "epic" or nil, R.banned)
+  R.offers = I.roll(owned, stats.luck, C.offerCount(), kind == "chest" and "epic" or nil, R.banned, nil, BIOME_FAVOR[R.biome or "plains"])
   R.pickT = 0
   if kind == "level" then ring(p.x, p.y - 6, 28, 22, S.Y, 2.2) end
   state = "pick"
@@ -1642,7 +1680,7 @@ function C.choose(i)
     R.banishMode = false
     local exclude = {}
     for _, o in ipairs(R.offers) do exclude[o.id] = true end
-    R.offers[i] = I.roll(owned, stats.luck, 1, R.offerKind == "chest" and "epic" or nil, R.banned, exclude)[1]
+    R.offers[i] = I.roll(owned, stats.luck, 1, R.offerKind == "chest" and "epic" or nil, R.banned, exclude, BIOME_FAVOR[R.biome or "plains"])[1]
     say(it.name .. " banished", 30, S.A)
     return
   end
@@ -1671,7 +1709,7 @@ function C.finishRun()
   state = "dead"
   R.deadTimer = 0
   local mins = secs() / 60
-  local souls = ((R.kills + (R.bonusKills or 0)) / 10 + 5 * mins + 25 * R.bossKills) * stats.souls * Tree.prestigeSouls(prof.prestige)
+  local souls = ((R.soulPts or 0) + 25 * R.bossKills + (R.bonusSouls or 0)) * stats.souls * Tree.prestigeSouls(prof.prestige)
   R.soulsEarned = floor(souls)
   prof.souls = prof.souls + R.soulsEarned
   prof.soulsTotal = (prof.soulsTotal or 0) + R.soulsEarned
@@ -2398,7 +2436,8 @@ local function renderHUD()
   local B = BIOME[bio]
   local bname = World.BIOMES[bio].name
   T(9, 3, bname, B.col, S.K)
-  T(10 + #bname, 3, ("danger %d  rewards x%.1f"):format(B.danger, B.reward), (B.danger >= 3) and S.R or S.A, S.K)
+  local sd = C.soulDecay(bio)
+  T(10 + #bname, 3, ("danger %d  souls x%.2f"):format(B.danger, sd), (B.danger >= 3) and S.R or ((sd < 0.6) and S.O or S.A), S.K)
   hudBar(7, 2, 40, p.xp / p.xpNext, S.C, S.W, S.D, 2)
   T(48, 2, ("%d / %d xp"):format(floor(p.xp), p.xpNext), S.A, S.K)
   -- timer (big pixel digits) + kills
@@ -2643,6 +2682,8 @@ local function renderPick()
   elseif R.offerKind == "chest" then word, sub, col, colTop = "TREASURE!", "pick a reward", S.Y, S.W
   elseif R.offerKind == "bonus" then word, sub, col, colTop = "HEAD START", "free pick", S.C, S.W
   else word, sub, col, colTop = "LEVEL UP!", "level " .. (p.level - p.pending + 1), S.Y, S.W end
+  local fav = FAVOR_NAME[R.biome or "plains"]
+  if fav and not R.banishMode then sub = sub .. "   -   " .. World.BIOMES[R.biome].name .. " favours " .. fav end
   -- dark ribbon across the screen behind the banner
   local ry0, ry1 = (top - 1) * 3 - 6, (top + 5) * 3 + 2
   scr.rect(0, ry0, PW, ry1 - ry0, S.K)
@@ -3037,7 +3078,7 @@ local function onKey(k)
     if n and n <= #R.offers then C.choose(n)
     elseif k == keys.r and R.rerolls > 0 and not R.banishMode then
       R.rerolls = R.rerolls - 1
-      R.offers = I.roll(owned, stats.luck, C.offerCount(), R.offerKind == "chest" and "epic" or nil, R.banned)
+      R.offers = I.roll(owned, stats.luck, C.offerCount(), R.offerKind == "chest" and "epic" or nil, R.banned, nil, BIOME_FAVOR[R.biome or "plains"])
       R.pickT = 0
     elseif k == keys.b and R.banishes > 0 then
       R.banishMode = not R.banishMode

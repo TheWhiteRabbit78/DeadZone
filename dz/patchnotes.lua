@@ -2,9 +2,19 @@
 
 local N = {}
 
-N.VERSION = "v2.90"
+N.VERSION = "v2.91"
 
 N.LIST = {
+  { "v2.91", "Easier start, biome rewards", {
+    "Plains: only zombies, ghouls (from 1:30) and brutes (from 5:00)",
+    "  no skeletons or bomb imps - but plains mobs toughen up over time",
+    "Gentler first 2 minutes: slower spawns, first horde at 1:30",
+    "Souls now come per biome: x the biome's reward, and they shrink",
+    "  the longer you stay - plains drops to x0.25 after 10 minutes",
+    "  (danger 2 floors at x0.5, danger 3 at x0.75, danger 4 never drops)",
+    "HUD shows your current souls multiplier",
+    "Biomes favour their families on level-ups and chests (x3 odds)",
+  } },
   { "v2.90", "Families + weapon stats for everyone", {
     "Element families: Lightning, Fire, Frost, Arcane, Explosive",
     "  every level of a family item = +15% damage for the whole family",

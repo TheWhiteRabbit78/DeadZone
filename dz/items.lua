@@ -331,7 +331,8 @@ local function rarityIndex(r)
 end
 
 -- roll n distinct offers; minRarity e.g. "epic" for chests; banned = set of ids; exclude = set of ids
-function I.roll(owned, luck, n, minRarity, banned, exclude)
+-- favor (optional): { family or item id = weight multiplier } - biome-themed odds
+function I.roll(owned, luck, n, minRarity, banned, exclude, favor)
   local minIdx = minRarity and rarityIndex(minRarity) or 1
   local boost = { common = 1, rare = 1 + luck * 0.3, epic = 1 + luck * 0.6, legendary = 1 + luck }
   local pool = {}
@@ -339,6 +340,7 @@ function I.roll(owned, luck, n, minRarity, banned, exclude)
     if available(it, owned, banned) and not (exclude and exclude[it.id]) and rarityIndex(it.rarity) >= minIdx then
       local w = I.RARITY[it.rarity].weight * boost[it.rarity]
       if it.req then w = 40 end
+      if favor then w = w * (favor[it.id] or (it.family and favor[it.family]) or 1) end
       pool[#pool + 1] = { it = it, w = w }
     end
   end
