@@ -22,7 +22,7 @@ I.RARITY_ORDER = { "common", "rare", "epic", "legendary" }
 
 I.BASE = {
   -- offense
-  dmg = 1, gundmg = 1, aoedmg = 1, rate = 1, proj = 0, pierce = 0, range = 1,
+  dmg = 1, gundmg = 1, wdmg = 1, aoedmg = 1, rate = 1, proj = 0, pierce = 0, range = 1,
   crit = 0.05, critdmg = 2, area = 1, boom = 1,
   bloodpact = 0, chain = 0, split = 0, ricochet = 0, corpse = 0,
   saws = 0, sawdmg = 1, aura = 0,
@@ -41,7 +41,7 @@ I.BASE = {
 I.LIST = {
   ---------------------------------------------------------------- common
   { id = "sharp",   name = "Sharpened Rounds", rarity = "common", max = 5, mods = { gundmg_pct = 0.12 }, lines = { "+12% gun damage" } },
-  { id = "oil",     name = "Oiled Trigger",    rarity = "common", max = 5, mods = { rate_pct = 0.10 },   lines = { "+10% fire rate" } },
+  { id = "oil",     name = "Oiled Trigger",    rarity = "common", max = 5, mods = { rate_pct = 0.10 },   lines = { "+10% fire rate, all weapons" } },
   { id = "boots",   name = "Running Boots",    rarity = "common", max = 4, mods = { speed_pct = 0.10 },  lines = { "+10% move speed" } },
   { id = "skin",    name = "Thick Skin",       rarity = "common", max = 5, mods = { maxhp = 3 },         lines = { "+30 max HP" }, heal = 3 },
   { id = "charm",   name = "Magnet Charm",     rarity = "common", max = 3, mods = { magnet_pct = 0.4 },  lines = { "+40% pickup range" } },
@@ -54,10 +54,10 @@ I.LIST = {
   { id = "focus",   name = "Focus Crystal",    rarity = "common", max = 3, mods = { cdr_pct = -0.10 },   lines = { "Spells recharge 10% faster", "Mage weapons fire faster too" } },
 
   ---------------------------------------------------------------- rare
-  { id = "barrel",  name = "Extra Barrel",  rarity = "rare", max = 3, mods = { proj = 1, gundmg_pct = -0.10 }, lines = { "+1 projectile", "!-10% gun damage" } },
+  { id = "barrel",  name = "Extra Barrel",  rarity = "rare", max = 3, mods = { proj = 1, wdmg_pct = -0.10 }, lines = { "+1 projectile, all weapons", "!-10% weapon damage" } },
   { id = "ap",      name = "AP Rounds",     rarity = "rare", max = 3, mods = { pierce = 1 },             lines = { "Bullets pierce +1 enemy" } },
-  { id = "heavy",   name = "Heavy Rounds",  rarity = "rare", max = 3, mods = { gundmg_x = 1.6, rate_x = 0.75 }, lines = { "x1.6 gun damage", "!-25% fire rate" } },
-  { id = "hair",    name = "Hair Trigger",  rarity = "rare", max = 3, mods = { rate_x = 1.8, gundmg_x = 0.7 },  lines = { "x1.8 fire rate", "!-30% gun damage" } },
+  { id = "heavy",   name = "Heavy Rounds",  rarity = "rare", max = 3, mods = { wdmg_x = 1.6, rate_x = 0.75 }, lines = { "x1.6 weapon damage", "!-25% fire rate" } },
+  { id = "hair",    name = "Hair Trigger",  rarity = "rare", max = 3, mods = { rate_x = 1.8, wdmg_x = 0.7 },  lines = { "x1.8 fire rate, all weapons", "!-30% weapon damage" } },
   { id = "hollow",  name = "Hollow Points", rarity = "rare", max = 3, mods = { critdmg = 0.75 },         lines = { "+75% crit damage" } },
   { id = "plate",   name = "Armor Plate",   rarity = "rare", max = 3, mods = { armor = 1.5, speed_pct = -0.08 }, lines = { "+1.5 armor", "!-8% move speed" } },
   { id = "saw",     name = "Buzzsaw",       rarity = "rare", max = 4, mods = { saws = 1 },               lines = { "+1 saw spinning around you" } },
@@ -65,11 +65,11 @@ I.LIST = {
   { id = "w2",      name = "Shotgun",       rarity = "rare", max = 1, mods = {}, weapon = 2, lines = { "New weapon", "5 pellets, short range" } },
   { id = "w3",      name = "SMG",           rarity = "rare", max = 1, mods = {}, weapon = 3, lines = { "New weapon", "Bullet hose" } },
   { id = "w4",      name = "Launcher",      rarity = "rare", max = 1, mods = {}, weapon = 4, lines = { "New weapon", "Explosive rockets" } },
-  { id = "staff",   name = "Arcane Staff",  rarity = "rare", max = 1, mods = {}, weapon = 5, lines = { "New mage weapon", "Slow homing orbs", "Scales with area damage", "and spell cooldown" } },
-  { id = "spear",   name = "Laser Spear",   rarity = "rare", max = 1, mods = {}, weapon = 6, lines = { "New mage weapon", "Instant beam, pierces all", "Scales with area damage", "and spell cooldown" } },
-  { id = "wand",    name = "Storm Wand",    rarity = "rare", max = 1, mods = {}, weapon = 7, lines = { "New mage weapon", "Lightning jumps to 5 mobs", "Scales with area damage", "and spell cooldown" } },
-  { id = "fstaff",  name = "Frost Staff",   rarity = "rare", max = 1, mods = {}, weapon = 8, lines = { "New mage weapon", "Shard fan that slows", "Scales with area damage", "and spell cooldown" } },
-  { id = "ember",   name = "Ember Rod",     rarity = "rare", max = 1, mods = {}, weapon = 9, lines = { "New mage weapon", "Exploding fireballs", "Scales with area damage", "and spell cooldown" } },
+  { id = "staff",   name = "Arcane Staff",  rarity = "rare", max = 1, mods = {}, weapon = 5, lines = { "New mage weapon", "Slow homing orbs", "Uses area damage + fire rate" } },
+  { id = "spear",   name = "Laser Spear",   rarity = "rare", max = 1, mods = {}, weapon = 6, lines = { "New mage weapon", "Instant beam, pierces all", "Uses area damage + fire rate" } },
+  { id = "wand",    name = "Storm Wand",    rarity = "rare", max = 1, mods = {}, weapon = 7, lines = { "New mage weapon", "Lightning jumps to 5 mobs", "Uses area damage + fire rate" } },
+  { id = "fstaff",  name = "Frost Staff",   rarity = "rare", max = 1, mods = {}, weapon = 8, lines = { "New mage weapon", "Shard fan that slows", "Uses area damage + fire rate" } },
+  { id = "ember",   name = "Ember Rod",     rarity = "rare", max = 1, mods = {}, weapon = 9, lines = { "New mage weapon", "Exploding fireballs", "Uses area damage + fire rate" } },
   -- explosion line
   { id = "exround", name = "Explosive Rounds", rarity = "rare", max = 3, mods = { exround = 1, rate_pct = -0.15 }, lines = { "Bullets blast on hit", "!-15% fire rate" } },
   { id = "bigbang", name = "Big Bang",      rarity = "rare", max = 4, mods = { area_pct = 0.25 },        lines = { "+25% explosion and spell size" } },
@@ -89,7 +89,7 @@ I.LIST = {
   { id = "glass",     name = "Glass Cannon", rarity = "epic", max = 2, mods = { dmg_x = 2, maxhp_x = 0.5 }, lines = { "x2 all damage", "!Halves your max HP now", "(HP you gain later counts fully)" } },
   { id = "blood",     name = "Blood Pact",   rarity = "epic", max = 2, mods = { bloodpact = 0.05 },  lines = { "+5% damage per 10 missing HP" } },
   { id = "greed",     name = "Greed",        rarity = "epic", max = 2, mods = { xp_pct = 0.6, spawn_pct = 0.3 }, lines = { "+60% XP", "!+30% more mobs" } },
-  { id = "overclock", name = "Overclock",    rarity = "epic", max = 2, mods = { rate_x = 1.5, drain = 1 }, lines = { "x1.5 fire rate", "!Lose 10 HP every 20s" } },
+  { id = "overclock", name = "Overclock",    rarity = "epic", max = 2, mods = { rate_x = 1.5, drain = 1 }, lines = { "x1.5 fire rate, all weapons", "!Lose 10 HP every 20s" } },
   { id = "coil",      name = "Storm Coil",   rarity = "epic", max = 3, mods = { chain = 0.15 },      lines = { "15% on hit: zap 3 nearby mobs", "Works with guns and mage weapons" } },
   { id = "split",     name = "Splitter",     rarity = "epic", max = 2, mods = { split = 1 },         lines = { "Bullets split in 2 on hit" } },
   { id = "rico",      name = "Ricochet",     rarity = "epic", max = 3, mods = { ricochet = 1 },      lines = { "Bullets bounce to another mob" } },
@@ -105,7 +105,7 @@ I.LIST = {
   { id = "conductor", name = "Conductor",    rarity = "epic", max = 1, mods = { conductor = 0.5 },   lines = { "Shocked mobs take another +50%", "Storm Coil zaps also shock" } },
 
   ---------------------------------------------------------------- legendary
-  { id = "hell",   name = "Bullet Hell",    rarity = "legendary", max = 1, mods = { proj = 3, gundmg_x = 0.6 }, lines = { "+3 projectiles", "!-40% gun damage" } },
+  { id = "hell",   name = "Bullet Hell",    rarity = "legendary", max = 1, mods = { proj = 3, wdmg_x = 0.6 }, lines = { "+3 projectiles, all weapons", "!-40% weapon damage" } },
   { id = "vamp",   name = "Vampire Fangs",  rarity = "legendary", max = 1, mods = { lifesteal = 0.03, regen_x = 0 }, lines = { "Heal 3% of damage dealt", "!No HP regen" } },
   { id = "exec",   name = "Executioner",    rarity = "legendary", max = 1, mods = { crit = 0.12, critdmg = 1.5 }, lines = { "+12% crit chance", "+150% crit damage" } },
   { id = "midas",  name = "Midas Crown",    rarity = "legendary", max = 1, mods = { luck = 3, xp_pct = 0.3, spawn_pct = 0.2 }, lines = { "Much rarer items", "+30% XP", "!+20% more mobs" } },
@@ -176,9 +176,38 @@ for _, it in ipairs(I.LIST) do
   it.parsed = parseMods(it.mods, "item " .. it.id)
 end
 
+-- element families: every level of a family item gives +15% damage to the
+-- whole family (spells, passives and mage weapons alike)
+I.FAMILY = {
+  lightning = { "thunder", "coil", "conductor", "wand" },
+  fire = { "firering", "meteor", "napalm", "pyro", "inferno", "armageddon", "ember" },
+  frost = { "frost", "permafrost", "zero", "fstaff" },
+  arcane = { "orbs", "archmage", "staff", "spear" },
+  explosive = { "w4", "mortar", "exround", "bigbang", "shrap", "corpse", "chainre", "nuke" },
+}
+I.FAMILY_BONUS = 0.15
+I.FAMILY_NAME = { lightning = "LIGHTNING", fire = "FIRE", frost = "FROST", arcane = "ARCANE", explosive = "EXPLOSIVE" }
+for fam, list in pairs(I.FAMILY) do
+  for _, id in ipairs(list) do
+    local it = I.byId[id]
+    it.family = fam
+    it.lines[#it.lines + 1] = "+15% all " .. fam .. " damage"
+  end
+end
+-- family damage multipliers for the items you own
+function I.families(owned)
+  local out = {}
+  for fam, list in pairs(I.FAMILY) do
+    local n = 0
+    for _, id in ipairs(list) do n = n + (owned[id] or 0) end
+    out[fam] = 1 + I.FAMILY_BONUS * n
+  end
+  return out
+end
+
 -- card tag: which weapons an item helps. GUNS = only bullets, SPELLS = spells
 -- and mage weapons (cooldown), MAGE = mage weapon. No tag = helps everything.
-local GUN_ONLY = { gundmg = true, rate = true, pierce = true, exround = true, split = true, ricochet = true }
+local GUN_ONLY = { gundmg = true, pierce = true, exround = true, split = true, ricochet = true }
 local function tagOf(it)
   if it.weapon then return (it.weapon >= 5) and "MAGE" or "GUNS" end
   local good, gun, spell = 0, 0, 0

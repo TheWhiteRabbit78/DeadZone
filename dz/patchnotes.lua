@@ -2,9 +2,18 @@
 
 local N = {}
 
-N.VERSION = "v2.81"
+N.VERSION = "v2.90"
 
 N.LIST = {
+  { "v2.90", "Families + weapon stats for everyone", {
+    "Element families: Lightning, Fire, Frost, Arcane, Explosive",
+    "  every level of a family item = +15% damage for the whole family",
+    "  e.g. Thunderstorm now also powers the Storm Wand and Storm Coil",
+    "Fire rate and projectile items now work on ALL weapons,",
+    "  and their drawbacks hit all weapons too (new: weapon damage)",
+    "Mage weapons: area dmg x weapon dmg x family x fire rate x crit",
+    "Cards show the family tag, pause screen shows family totals",
+  } },
   { "v2.81", "Weapon tags", {
     "Level-up cards now show GUNS / MAGE / SPELLS when an item",
     "  only helps that kind of weapon (no tag = helps everything)",

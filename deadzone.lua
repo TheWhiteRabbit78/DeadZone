@@ -217,6 +217,15 @@ local ELEM = {
   aura = "poison", saws = "melee", thorns = "melee",
   ["frost staff"] = "frost", ["ember rod"] = "fire", ["storm wand"] = "lightning",
 }
+-- which damage sources belong to which item family (family damage bonus)
+local FAMSRC = {
+  thunder = "lightning", lightning = "lightning", ["storm wand"] = "lightning",
+  ["fire ring"] = "fire", burn = "fire", napalm = "fire", meteor = "fire", ["ember rod"] = "fire",
+  ["frost nova"] = "frost", ["frost staff"] = "frost",
+  orbs = "arcane", ["arcane staff"] = "arcane", ["laser spear"] = "arcane",
+  launcher = "explosive", mortar = "explosive", ["exp. rounds"] = "explosive", explosions = "explosive",
+  ["corpse bomb"] = "explosive", ["chain reaction"] = "explosive", shrapnel = "explosive",
+}
 local SPELLS = { "firering", "meteor", "frost", "thunder", "orbs" }
 
 ---------------------------------------------------------------------- sound
@@ -281,6 +290,7 @@ end
 
 local function recompute()
   stats = I.compute(owned, Tree.mods(prof.tree, prof.prestige), p.hpOrder)
+  if R then R.fam = I.families(owned) end
   local newMax = max(0.5, stats.maxhp)
   p.maxHp = newMax
   if p.hp > newMax then p.hp = newMax end
@@ -462,6 +472,8 @@ function C.damageMob(m, dmg, kx, ky, raw, src)
     local e = ELEM[src]
     local bm = e and R.bmod and R.bmod[e]
     if bm then dmg = dmg * bm end
+    local f = FAMSRC[src]
+    if f and R.fam then dmg = dmg * R.fam[f] end
   end
   if not raw then
     dmg = dmg * R.mult * (1 - R.res)
@@ -755,7 +767,7 @@ function C.fire()
   local shots = max(1, min(proj, 240 - #bullets))
   over = over * proj / shots
   local fan = w.fan * (1 + (proj - w.proj) * 0.2)
-  local dmg = w.dmg * stats.gundmg * over
+  local dmg = w.dmg * stats.gundmg * stats.wdmg * over
   for i = 1, shots do
     local a = baseA + (random() - 0.5) * w.jitter
     if shots > 1 then a = a - fan / 2 + fan * (i - 1) / (shots - 1) end
@@ -763,7 +775,7 @@ function C.fire()
     bullets[#bullets + 1] = {
       x = ox + ca * 6, y = oy + sa * 6, vx = ca * w.speed, vy = sa * w.speed,
       life = floor(range / w.speed), dmg = dmg, pierce = floor(stats.pierce + 0.5),
-      ric = floor(stats.ricochet + 0.5), hit = {}, col = w.col, aoe = w.aoe, aoeBase = w.dmg * over,
+      ric = floor(stats.ricochet + 0.5), hit = {}, col = w.col, aoe = w.aoe, aoeBase = w.dmg * stats.wdmg * over,
     }
   end
   addPart(ox + p.fx * 8, oy + p.fy * 8, 0, 0, 2, S.Y)
@@ -773,7 +785,11 @@ end
 
 -- mage weapons
 function C.fireMagic(w, baseA, ox, oy, range)
-  local dmg = w.dmg * stats.aoedmg
+  -- fire rate + spell cooldown; past one cast per tick the extra turns into damage
+  local desired = w.cd * stats.cdr / stats.rate
+  local over = 1
+  if desired < 1 then over = 1 / desired; desired = 1 end
+  local dmg = w.dmg * stats.aoedmg * stats.wdmg * over
   local extra = floor(stats.proj + 0.5)
   local kind = w.magic
   local function crit(d)
@@ -829,8 +845,7 @@ function C.fireMagic(w, baseA, ox, oy, range)
     end
     sfx("zap")
   end
-  local desired = w.cd * stats.cdr
-  p.cd = p.cd + max(1, desired)
+  p.cd = p.cd + desired
   sfx("shoot")
 end
 
@@ -2463,11 +2478,12 @@ end
 ---------------------------------------------------------------------- render: overlays
 local function statLines()
   local st = stats
-  return {
+  local L = {
     ("All damage   x%.2f"):format(st.dmg),
+    ("Weapon dmg   x%.2f"):format(st.wdmg),
     ("Gun damage   x%.2f"):format(st.gundmg),
     ("Area damage  x%.2f"):format(st.aoedmg),
-    ("Fire rate    x%.2f"):format(st.rate),
+    ("Fire rate    x%.2f   Cooldown x%.2f"):format(st.rate, st.cdr),
     ("Projectiles  +%d   Pierce %d"):format(floor(st.proj + 0.5), floor(st.pierce + 0.5)),
     ("Crit         %d%%  x%.2f"):format(floor(st.crit * 100 + 0.5), st.critdmg),
     ("Area size    x%.2f"):format(st.area),
@@ -2480,6 +2496,12 @@ local function statLines()
     ("Luck         %.1f"):format(st.luck),
     ("Mob spawns   x%.2f"):format(st.spawn),
   }
+  -- family bonuses you have
+  local fam = R.fam or {}
+  for _, f in ipairs({ "lightning", "fire", "frost", "arcane", "explosive" }) do
+    if (fam[f] or 1) > 1.001 then L[#L + 1] = ("%-12s x%.2f"):format(I.FAMILY_NAME[f]:sub(1, 1) .. I.FAMILY_NAME[f]:sub(2):lower(), fam[f]) end
+  end
+  return L
 end
 
 local function sourceLines(n)
@@ -2560,6 +2582,11 @@ local function drawPickCard(it, i, x0, y0, w, h)
     T(x0 + floor((w - #it.tag - 2) / 2), y0 + 1, " " .. it.tag .. " ", S.K, tc)
   end
   T(x0 + 1, y0 + 2, blank, S.W, S.K)
+  if it.family then
+    local FC = { lightning = S.Y, fire = S.O, frost = S.C, arcane = S.U, explosive = S.R }
+    local ft = I.FAMILY_NAME[it.family]
+    T(x0 + floor((w - #ft - 2) / 2), y0 + 2, " " .. ft .. " ", (it.family == "arcane") and S.W or S.K, FC[it.family])
+  end
   -- big icon (24x24 art, falls back to a scaled mini icon)
   local spr = itemSprite(it.id)
   if spr then scr.sprite(spr, px0 + w - 24, (iconY - 1) * 3, false, R.banishMode and S.R or nil)
