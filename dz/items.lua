@@ -34,6 +34,7 @@ I.BASE = {
   -- defense
   maxhp = 10, regen = 0, armor = 0, dodge = 0, lifesteal = 0, iframes = 1,
   thorns = 0, thornpulse = 0, shield = 0, retal = 0, bulwark = 0, revive = 0,
+  guard = 1, regenpct = 0,   -- guard: damage taken multiplier (after armor); regenpct: max HP healed per second
   -- utility
   speed = 1, magnet = 28, xp = 1, luck = 0, spawn = 1, drain = 0,
   rerolls = 3, banish = 0, choices = 3, bosschests = 1, headstart = 0, souls = 1, drops = 1,
@@ -52,6 +53,7 @@ I.LIST = {
   { id = "notes",   name = "Study Notes",      rarity = "common", max = 3, mods = { xp_pct = 0.15 },     lines = { "+15% XP" } },
   { id = "powder",  name = "Black Powder",     rarity = "common", max = 5, mods = { aoedmg_pct = 0.12 }, lines = { "+12% area damage" } },
   { id = "padding", name = "Padded Vest",      rarity = "common", max = 4, mods = { armor = 0.5 },       lines = { "+0.5 armor" } },
+  { id = "ironskin", name = "Iron Skin",       rarity = "common", max = 5, mods = { maxhp = 2, armor = 0.5 }, lines = { "+20 max HP", "+0.5 armor" }, heal = 2 },
   { id = "focus",   name = "Focus Crystal",    rarity = "common", max = 3, mods = { cdr_pct = -0.10 },   lines = { "Spells recharge 10% faster", "Mage weapons fire faster too" } },
 
   ---------------------------------------------------------------- rare
@@ -79,6 +81,8 @@ I.LIST = {
   { id = "spike",   name = "Spiked Armor",  rarity = "rare", max = 3, mods = { thorns = 1 },             lines = { "Getting hit blasts mobs around you", "Damage grows with armor" } },
   { id = "leech",   name = "Leech Rounds",  rarity = "rare", max = 3, mods = { lifesteal = 0.01 },       lines = { "Heal 1% of damage dealt", "(max 1% HP per second)" } },
   { id = "eshield", name = "Energy Shield", rarity = "rare", max = 3, mods = { shield = 1 },             lines = { "Blocks a hit every 12s", "More copies recharge faster" } },
+  { id = "stoneheart", name = "Stone Heart", rarity = "rare", max = 3, mods = { maxhp_pct = 0.10, regen = 0.5 }, lines = { "+10% max HP", "+5 HP every 10s" } },
+  { id = "anchor",  name = "Anchor",        rarity = "rare", max = 3, mods = { guard_x = 0.8, speed_pct = -0.10 }, lines = { "Take 20% less damage", "!-10% move speed" } },
   -- mage line
   { id = "firering", name = "Fire Ring",    rarity = "rare", max = 5, mods = { firering = 1 },           lines = { "Ring of flames burns mobs near you", "Bigger and hotter per level" } },
   { id = "meteor",  name = "Meteor",        rarity = "rare", max = 4, mods = { meteor = 1 },             lines = { "Meteor hits the biggest crowd", "+1 meteor per level" } },
@@ -102,6 +106,8 @@ I.LIST = {
   { id = "jugg",      name = "Juggernaut",   rarity = "epic", max = 2, mods = { maxhp_x = 2, speed_pct = -0.2 }, lines = { "Doubles your max HP now", "!-20% move speed" } },
   { id = "retal",     name = "Retaliation",  rarity = "epic", max = 2, mods = { retal = 1 },         lines = { "x2 damage for 3s after a hit" } },
   { id = "pyro",      name = "Pyromaniac",   rarity = "epic", max = 2, mods = { pyro = 0.3, burn_x = 1.5 }, lines = { "Burning mobs take +30% damage", "x1.5 burn damage" } },
+  { id = "citadel",   name = "Fortress",     rarity = "epic", max = 1, mods = { maxhp_x = 1.5, guard_x = 0.75, armor = 2, speed_pct = -0.2 }, lines = { "x1.5 max HP now", "Take 25% less damage", "+2 armor", "!-20% move speed" } },
+  { id = "regenerator", name = "Regenerator", rarity = "epic", max = 2, mods = { regenpct = 0.015 }, lines = { "Heal 1.5% max HP per second", "x2 while standing still" } },
   { id = "permafrost", name = "Permafrost",  rarity = "epic", max = 1, mods = { permafrost = 0.4 },  lines = { "Frozen / chilled mobs take", "+40% damage" } },
   { id = "conductor", name = "Conductor",    rarity = "epic", max = 1, mods = { conductor = 0.5 },   lines = { "Shocked mobs take another +50%", "Storm Coil zaps also shock" } },
 
@@ -122,6 +128,7 @@ I.LIST = {
   { id = "maiden",   name = "Iron Maiden",   rarity = "legendary", max = 1, req = { spike = 3, plate = 1 }, mods = { thornpulse = 1, armor = 2 }, lines = { "EVOLUTION", "Thorns blast every 2s", "+2 armor" } },
   { id = "inferno",  name = "Inferno",       rarity = "legendary", max = 1, req = { firering = 5, bigbang = 1 }, mods = { fireringdmg_x = 2.5, area_pct = 0.3 }, lines = { "EVOLUTION", "x2.5 Fire Ring damage", "+30% size" } },
   { id = "armageddon", name = "Armageddon",  rarity = "legendary", max = 1, req = { meteor = 4, demo = 1 }, mods = { meteor = 3, meteordmg_x = 1.5 }, lines = { "EVOLUTION", "+3 meteors", "x1.5 meteor damage" } },
+  { id = "livingfortress", name = "Living Fortress", rarity = "legendary", max = 1, req = { jugg = 1, spike = 1 }, mods = { thornpulse = 1, guard_x = 0.7 }, lines = { "EVOLUTION", "Thorns blast every 2s", "Take 30% less damage" } },
   { id = "zero",     name = "Absolute Zero", rarity = "legendary", max = 1, req = { frost = 3, permafrost = 1 }, mods = { frostcd_x = 0.5, frost = 1 }, lines = { "EVOLUTION", "Frost Nova every 3s", "+1 nova level" } },
 }
 
@@ -206,14 +213,18 @@ I.FAMILY = {
   frost = { "frost", "permafrost", "zero", "fstaff" },
   arcane = { "orbs", "archmage", "staff", "spear" },
   explosive = { "w4", "mortar", "exround", "bigbang", "shrap", "corpse", "chainre", "nuke" },
+  -- close-range tank damage (saws, aura, thorns); also grows with max HP
+  fortress = { "saw", "sawstorm", "aura", "plague", "spike", "maiden", "jugg", "plate", "ironskin", "stoneheart", "anchor", "citadel", "regenerator", "livingfortress" },
 }
 I.FAMILY_BONUS = 0.15
-I.FAMILY_NAME = { lightning = "LIGHTNING", fire = "FIRE", frost = "FROST", arcane = "ARCANE", explosive = "EXPLOSIVE" }
+-- fortress has many members (tank stat items count too), so each level gives less
+I.FAMILY_BONUS_OF = { fortress = 0.08 }
+I.FAMILY_NAME = { lightning = "LIGHTNING", fire = "FIRE", frost = "FROST", arcane = "ARCANE", explosive = "EXPLOSIVE", fortress = "FORTRESS" }
 for fam, list in pairs(I.FAMILY) do
   for _, id in ipairs(list) do
     local it = I.byId[id]
     it.family = fam
-    it.lines[#it.lines + 1] = "+15% all " .. fam .. " damage"
+    it.lines[#it.lines + 1] = (fam == "fortress") and "+8% saw/aura/thorns dmg" or ("+15% all " .. fam .. " damage")
   end
 end
 -- family damage multipliers for the items you own
@@ -222,7 +233,7 @@ function I.families(owned)
   for fam, list in pairs(I.FAMILY) do
     local n = 0
     for _, id in ipairs(list) do n = n + (owned[id] or 0) end
-    out[fam] = 1 + I.FAMILY_BONUS * n
+    out[fam] = 1 + (I.FAMILY_BONUS_OF[fam] or I.FAMILY_BONUS) * n
   end
   return out
 end
@@ -379,12 +390,20 @@ end
 function I.roll(owned, luck, n, minRarity, banned, exclude, favor)
   local minIdx = minRarity and rarityIndex(minRarity) or 1
   local boost = { common = 1, rare = 1 + luck * 0.3, epic = 1 + luck * 0.6, legendary = 1 + luck }
+  -- families you've committed to (2+ items) show up twice as often
+  local famN = {}
+  for fam, list in pairs(I.FAMILY) do
+    local n = 0
+    for _, id in ipairs(list) do if (owned[id] or 0) > 0 then n = n + 1 end end
+    famN[fam] = n
+  end
   local pool = {}
   for _, it in ipairs(I.LIST) do
     if available(it, owned, banned) and not (exclude and exclude[it.id]) and rarityIndex(it.rarity) >= minIdx then
       local w = I.RARITY[it.rarity].weight * boost[it.rarity]
       if it.req then w = 40 end
       if favor then w = w * (favor[it.id] or (it.family and favor[it.family]) or 1) end
+      if it.family and famN[it.family] >= 2 then w = w * 2 end
       pool[#pool + 1] = { it = it, w = w }
     end
   end

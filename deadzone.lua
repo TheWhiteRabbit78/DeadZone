@@ -271,6 +271,7 @@ local FAMSRC = {
   orbs = "arcane", ["arcane staff"] = "arcane", ["laser spear"] = "arcane",
   launcher = "explosive", mortar = "explosive", ["exp. rounds"] = "explosive", explosions = "explosive",
   ["corpse bomb"] = "explosive", ["chain reaction"] = "explosive", shrapnel = "explosive",
+  saws = "fortress", aura = "fortress", thorns = "fortress",
 }
 local SPELLS = { "firering", "meteor", "frost", "thunder", "orbs" }
 
@@ -539,6 +540,8 @@ function C.damageMob(m, dmg, kx, ky, raw, src)
     if e and m.immune == e then dmg = dmg * 0.1 end
     local f = FAMSRC[src]
     if f and R.fam then dmg = dmg * R.fam[f] end
+    -- close-range tank damage: +1% per 10 max HP
+    if f == "fortress" then dmg = dmg * (1 + 0.01 * p.maxHp) end
   end
   if not raw then
     dmg = dmg * R.mult * (1 - R.res)
@@ -677,7 +680,7 @@ function C.hurtPlayer(dmg)
     addPart(p.x, p.y - 16, 0, -0.5, 10, S.C)
     return
   end
-  dmg = dmg * (1 - I.armorReduction(stats.armor))
+  dmg = dmg * (1 - I.armorReduction(stats.armor)) * max(0.4, stats.guard)
   p.hp = p.hp - dmg
   p.iframes = floor(hitIframes(secs()) * stats.iframes)
   if stats.retal > 0 then p.retalT = 60 end
@@ -1224,6 +1227,11 @@ function C.updatePlayer()
       addPart(p.x, p.y - 16, 0, -0.4, 10, S.g)
     end
   end
+  if stats.regenpct > 0 and p.hp < p.maxHp then
+    -- Regenerator: % of max HP per second, doubled while standing still
+    p.hp = min(p.maxHp, p.hp + p.maxHp * stats.regenpct / TPS * (p.moving and 1 or 2))
+    if frame % 15 == 0 then addPart(p.x + random(-4, 4), p.y - 14, 0, -0.4, 10, S.g) end
+  end
   if stats.drain > 0 then
     p.drainT = p.drainT + stats.drain
     if p.drainT >= 400 then
@@ -1445,7 +1453,7 @@ function C.updateMobs()
           end
           if d.reaper and dist < r + 6 and (m.atk or 0) <= 0 then
             -- the Reaper ignores armor: every touch takes 45% of your max HP
-            C.hurtPlayer(p.maxHp * 0.45 / max(0.2, 1 - I.armorReduction(stats.armor)))
+            C.hurtPlayer(p.maxHp * 0.45 / max(0.2, 1 - I.armorReduction(stats.armor)) / max(0.4, stats.guard))
             m.atk, m.atkAnim = 20, 10
           elseif not d.bomb and not d.reaper and dist < r + 5 and (m.atk or 0) <= 0 and (m.frozenT or 0) <= 0 then
             local before = p.hp
@@ -1513,7 +1521,7 @@ function C.updatePassives()
         local r = m.def.r + 3
         if dx * dx + dy * dy <= r * r and (m.sawCd or 0) <= frame then
           m.sawCd = frame + 8
-          C.damageMob(m, 5 * stats.sawdmg, cos(s[3]), sin(s[3]), false, "saws")
+          C.damageMob(m, 8 * stats.sawdmg * aoe, cos(s[3]), sin(s[3]), false, "saws")
         end
       end)
     end
@@ -3117,7 +3125,7 @@ function V.statLines()
     ("Max HP       %d"):format(floor(p.maxHp * 10 + 0.5)),
     ("Armor        %.1f  (-%d%% dmg)"):format(st.armor, floor(I.armorReduction(st.armor) * 100 + 0.5)),
     ("Dodge        %d%%"):format(floor(st.dodge * 100 + 0.5)),
-    ("Lifesteal    %.1f%%"):format(st.lifesteal * 100),
+    ("Lifesteal    %.1f%%   Dmg taken x%.2f"):format(st.lifesteal * 100, max(0.4, st.guard)),
     ("Move speed   x%.2f"):format(st.speed),
     ("XP gain      x%.2f"):format(st.xp),
     ("Luck         %.1f"):format(st.luck),
@@ -3125,7 +3133,7 @@ function V.statLines()
   }
   -- family bonuses you have
   local fam = R.fam or {}
-  for _, f in ipairs({ "lightning", "fire", "frost", "arcane", "explosive" }) do
+  for _, f in ipairs({ "lightning", "fire", "frost", "arcane", "explosive", "fortress" }) do
     if (fam[f] or 1) > 1.001 then L[#L + 1] = ("%-12s x%.2f"):format(I.FAMILY_NAME[f]:sub(1, 1) .. I.FAMILY_NAME[f]:sub(2):lower(), fam[f]) end
   end
   return L
@@ -3212,7 +3220,7 @@ function V.drawPickCard(it, i, x0, y0, w, h)
   end
   T(x0 + 1, y0 + 2, blank, S.W, S.K)
   if it.family then
-    local FC = { lightning = S.Y, fire = S.O, frost = S.C, arcane = S.U, explosive = S.R }
+    local FC = { lightning = S.Y, fire = S.O, frost = S.C, arcane = S.U, explosive = S.R, fortress = S.A }
     local ft = I.FAMILY_NAME[it.family]
     T(x0 + floor((w - #ft - 2) / 2), y0 + 2, " " .. ft .. " ", (it.family == "arcane") and S.W or S.K, FC[it.family])
   end
@@ -3316,7 +3324,8 @@ function V.renderPause()
   center(y0 + 1, "PAUSED", S.Y)
   T(x0 + 3, y0 + 3, "YOUR STATS", S.A)
   for i, l in ipairs(V.statLines()) do T(x0 + 3, y0 + 4 + i, l, S.W) end
-  T(x0 + 46, y0 + 3, ("YOUR ITEMS  spells %d/%d  passives %d/%d"):format(I.slotCount(owned, "spell"), I.SLOTS.spell, I.slotCount(owned, "passive"), I.SLOTS.passive), S.A)
+  T(x0 + 46, y0 + 3, "YOUR ITEMS", S.A)
+  T(x0 + 46, y0 + 4, ("spells %d/%d  passives %d/%d"):format(I.slotCount(owned, "spell"), I.SLOTS.spell, I.slotCount(owned, "passive"), I.SLOTS.passive), S.D)
   local items = V.ownedList()
   if #items == 0 then T(x0 + 46, y0 + 5, "nothing yet", S.D) end
   for i, e in ipairs(items) do

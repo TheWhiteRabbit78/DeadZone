@@ -2,9 +2,21 @@
 
 local N = {}
 
-N.VERSION = "v3.21"
+N.VERSION = "v3.30"
 
 N.LIST = {
+  { "v3.30", "Fortress - the turtle build", {
+    "New FORTRESS family: saws, aura, thorns, Spiked Armor, Iron Maiden,",
+    "  Plague Heart, Juggernaut, Armor Plate + the new tank items",
+    "  +8% saw/aura/thorns damage per family level",
+    "Saws, aura and thorns: +1% damage per 10 max HP",
+    "Saws now scale with area damage (they ignored it before) and hit harder",
+    "New items: Iron Skin, Stone Heart, Anchor, Fortress, Regenerator",
+    "New evolution: Living Fortress (Juggernaut + Spiked Armor)",
+    "New stat: damage taken (Anchor, Fortress...) - on top of armor, min x0.40",
+    "Offers lean toward families you've committed to (2+ items: x2 odds)",
+    "Pause menu: slot counts no longer overlap the damage list",
+  } },
   { "v3.21", "Hotfix", {
     "Fixed v3.20 not starting on the server",
     "  (\"more than 200 local variables\" error)",
