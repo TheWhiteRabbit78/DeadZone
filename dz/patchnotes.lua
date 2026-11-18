@@ -2,9 +2,20 @@
 
 local N = {}
 
-N.VERSION = "v2.60"
+N.VERSION = "v2.70"
 
 N.LIST = {
+  { "v2.70", "Everything moves", {
+    "New animated sprites: player, zombie, ghoul, brute, skeleton,",
+    "  bomb imp and the Grave King - walk cycles and attack swings",
+    "Skeletons draw their bow before shooting, bomb imps swell when lit",
+    "Death animations: mobs fall over, leave a body and a blood pool",
+    "You get a death animation too before the death screen",
+    "Muzzle flash, hit sparks, explosion flash + fire ring + smoke",
+    "Level-up ring, sparkling XP gems, red screen edge when hurt",
+    "New HUD: heart + HP bar, XP bar, big timer, kill counter,",
+    "  weapon slots with pictures, pixel boss bar",
+  } },
   { "v2.60", "Level-up cards", {
     "Big LEVEL UP! / TREASURE! / HEAD START / BANISH banner",
     "Cards deal in from below (rerolls deal a fresh hand)",

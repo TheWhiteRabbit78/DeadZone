@@ -78,6 +78,27 @@ for i, letter in ipairs(PRESTIGE_SHIRT) do
   for r, row in ipairs(SPR.player) do rows[r] = row:gsub("U", letter) end
   playerSpr[i - 1] = G.compile(rows)
 end
+-- animated sprites: ANIM[name][anim][frame]; the player gets one set per prestige shirt
+local ANIM = {}
+do
+  local src = require("dz.anims")
+  local function build(set, letter)
+    local out = {}
+    for an, frames in pairs(set) do
+      local L = {}
+      for k, rows in ipairs(frames) do
+        local rr = {}
+        for r, row in ipairs(rows) do rr[r] = letter and row:gsub("U", letter) or row end
+        L[k] = G.compile(rr)
+      end
+      out[an] = L
+    end
+    return out
+  end
+  for name, set in pairs(src) do if name ~= "player" then ANIM[name] = build(set) end end
+  ANIM.playerP = {}
+  for i, letter in ipairs(PRESTIGE_SHIRT) do ANIM.playerP[i - 1] = build(src.player, letter) end
+end
 local BLACK = G.pattern({ S.K, S.K, S.K, S.K, S.K, S.K })
 
 -- tiny 3x5 pixel font for floating damage numbers
@@ -232,6 +253,7 @@ local function newRun()
     outposts = {}, activeOutposts = {}, followers = {}, survivor = nil, nextSurvivor = 180 * TPS,
     rescued = 0, nestsCleared = 0,
     dmgSrc = {}, dmgTick = 0, dmgHist = {}, dmgSum = 0, dps = 0, nums = {},
+    corpses = {}, booms = {}, dyingT = 0,
   }
   owned = {}
   mobs, bullets, eshots, gems, pickups, parts, beams, strikes, fires, orbs = {}, {}, {}, {}, {}, {}, {}, {}, {}, {}
@@ -377,6 +399,9 @@ function C.damageMob(m, dmg, kx, ky, raw, src)
   end
   m.hp = m.hp - dmg
   m.flash = 2
+  if #parts < 200 and random() < 0.35 then
+    addPart(m.x + random(-2, 2), m.y - 8, (random() - 0.5) * 1.6, -random() * 1.2, random(3, 6), DEATH_COL[m.kind] or S.R)
+  end
   if kx and not m.def.heavy then
     local l = sqrt(kx * kx + ky * ky)
     if l > 0 then
@@ -414,6 +439,7 @@ function C.explode(x, y, rad, dmg, o)
     local dx, dy = p.x - x, (p.y - 6) - y
     if dx * dx + dy * dy <= rad * rad then C.hurtPlayer(3 * mobDmg(secs())) end
   end
+  if #R.booms < 24 then R.booms[#R.booms + 1] = { x = x, y = y, r = rad, t = 0 } end
   local cols = { S.O, S.Y, S.R, S.W }
   local n = o.small and 5 or floor(10 + rad)
   for _ = 1, n do
@@ -517,6 +543,12 @@ function C.killMob(m)
   C.dropGem(m.x, m.y - 4, m.def.xp * (1 + secs() / 400) * (m.elite and 4 or 1))
   burst(m.x, m.y - 6, 8, DEATH_COL[m.kind] or S.R, 1.4)
   burst(m.x, m.y - 6, 4, S.R, 0.8)
+  local an = ANIM[m.def.spr]
+  if an and an.death then
+    local cs = R.corpses
+    if #cs >= 45 then table.remove(cs, 1) end
+    cs[#cs + 1] = { x = m.x, y = m.y, a = an.death, t = 0, flip = m.flip }
+  end
   sfx("kill")
   if m.def.static and m.outpost then
     m.outpost.state = "cleared"
@@ -622,6 +654,7 @@ function C.fire()
     end
   end
   if bestA then baseA = bestA end
+  p.recoilT, p.muzT, p.muzA = 2, 2, baseA
 
   -- fire rate beyond 1 volley per tick and shots that don't fit under the
   -- bullet cap are not lost: they turn into extra damage on what does fire
@@ -765,6 +798,9 @@ function C.updatePlayer()
   p.x, p.y = C.pushStructures(world.pushOut(p.x + p.vx + p.knx, p.y + p.vy + p.kny, 4))
   p.knx, p.kny = p.knx * 0.7, p.kny * 0.7
   p.moving = (ix ~= 0 or iy ~= 0)
+  p.walkP = (p.walkP or 0) + sqrt(p.vx * p.vx + p.vy * p.vy)
+  if (p.recoilT or 0) > 0 then p.recoilT = p.recoilT - 1 end
+  if (p.muzT or 0) > 0 then p.muzT = p.muzT - 1 end
 
   local shooting = held[keys.space]
   if ax ~= 0 or ay ~= 0 then
@@ -870,6 +906,7 @@ function C.updateMobs()
             local tx, ty = p.x - sx, p.y - 7 - sy
             local l = sqrt(tx * tx + ty * ty)
             eshots[#eshots + 1] = { x = sx, y = sy, vx = tx / l * 2.6, vy = ty / l * 2.6, life = 48, dmg = 1 * mobDmg(s) * (m.elite and 1.5 or 1) }
+            m.atkAnim = 8
           end
         end
 
@@ -903,6 +940,7 @@ function C.updateMobs()
           m.y = m.y + ny * mv
           if not d.boss then m.x, m.y = C.pushStructures(world.pushOut(m.x, m.y, 3)) end
           m.moving = mv ~= 0
+          m.walkP = (m.walkP or 0) + abs(mv)
 
           local r = d.r
           -- separation runs every other tick per mob (halves the cost with big hordes)
@@ -924,14 +962,17 @@ function C.updateMobs()
           end) end
 
           if m.atk and m.atk > 0 then m.atk = m.atk - 1 end
+          if m.atkAnim and m.atkAnim > 0 then m.atkAnim = m.atkAnim - 1 end
           if siege and tdist < d.r + 13 and (m.atk or 0) <= 0 and not d.bomb then
             siege.hp = siege.hp - d.dmg * mobDmg(s) * (m.elite and 1.5 or 1)
             m.atk = 20
+            m.atkAnim = 10
             addPart(siege.x + random(-6, 6), siege.y - 8, 0, -0.4, 5, S.R)
           end
           if not d.bomb and dist < r + 5 and (m.atk or 0) <= 0 and (m.frozenT or 0) <= 0 then
             local before = p.hp
             C.hurtPlayer(d.dmg * mobDmg(s) * (m.elite and 1.5 or 1))
+            if (m.atkAnim or 0) <= 0 then m.atkAnim = 10 end
             if p.hp < before then
               m.atk = d.heavy and 40 or 20
               if d.heavy then
@@ -1288,6 +1329,17 @@ function C.updateFx()
     if b[5] <= 0 then removeAt(beams, i) end
   end
   if UI.shake > 0 then UI.shake = UI.shake - 1 end
+  local cs = R.corpses
+  for i = #cs, 1, -1 do
+    local c = cs[i]
+    c.t = c.t + 1
+    if c.t > #c.a * 4 + 70 then table.remove(cs, i) end
+  end
+  for i = #R.booms, 1, -1 do
+    local b = R.booms[i]
+    b.t = b.t + 1
+    if b.t > 10 then removeAt(R.booms, i) end
+  end
   if UI.msgTimer > 0 then UI.msgTimer = UI.msgTimer - 1 end
 end
 
@@ -1299,6 +1351,7 @@ function C.startPick(kind)
   R.banishMode = false
   R.offers = I.roll(owned, stats.luck, C.offerCount(), kind == "chest" and "epic" or nil, R.banned)
   R.pickT = 0
+  if kind == "level" then ring(p.x, p.y - 6, 28, 22, S.Y, 2.2) end
   state = "pick"
   sfx("level")
 end
@@ -1344,6 +1397,15 @@ function C.choose(i)
 end
 
 function C.gameOver()
+  if state == "dying" or state == "dead" then return end
+  -- play the death animation first; C.finishRun() shows the death screen
+  state = "dying"
+  R.dyingT = 0
+  UI.shake = 4
+  burst(p.x, p.y - 7, 14, S.R, 1.6)
+end
+
+function C.finishRun()
   state = "dead"
   R.deadTimer = 0
   local mins = secs() / 60
@@ -1725,6 +1787,24 @@ local function stars(n)
 end
 
 ---------------------------------------------------------------------- render: world
+-- current animation frame for a mob (falls back to the static sprite)
+local function mobFrame(m)
+  local A = ANIM[m.def.spr]
+  if not A then return spr[m.def.spr] end
+  local atk = A.attack
+  if atk then
+    if m.fuse then return atk[floor(frame / 3) % #atk + 1] end
+    if m.def.ranged and m.cd < 12 and m.cd > 0 then return atk[(m.cd < 6) and 2 or 1] end
+    if (m.atkAnim or 0) > 0 then
+      local n = #atk
+      return atk[min(n, floor((10 - m.atkAnim) * n / 10) + 1)]
+    end
+  end
+  local w = A.walk
+  if not m.moving then return w[2] end
+  return w[floor((m.walkP or 0) / 3 + (m.phase or 0)) % #w + 1]
+end
+
 local function renderWorld()
   local sh = UI.shake
   local sx = sh > 0 and random(-sh, sh) or 0
@@ -1743,8 +1823,19 @@ local function renderWorld()
     end
   end
 
-  for _, g in ipairs(gems) do
-    scr.sprite(g.v >= 4 and spr.xp_big or spr.xp_orb, g.x - 2 - camX, g.y - 2 - camY)
+  -- corpses: death animation, then the body lies there and fades
+  for _, c in ipairs(R.corpses) do
+    local n = #c.a
+    local f = c.a[min(n, floor(c.t / 4) + 1)]
+    if c.t < n * 4 + 50 or frame % 4 < 2 then
+      scr.sprite(f, c.x - f.w / 2 - camX, c.y - f.h + 1 - camY, c.flip)
+    end
+  end
+
+  for i, g in ipairs(gems) do
+    local gx, gy = g.x - 2 - camX, g.y - 2 - camY
+    scr.sprite(g.v >= 4 and spr.xp_big or spr.xp_orb, gx, gy)
+    if (frame + i * 7) % 30 == 0 then scr.pixel(gx + 1, gy, S.W) end
   end
   for _, it in ipairs(pickups) do
     if it.ttl > 5 * TPS or frame % 6 < 3 then
@@ -1806,31 +1897,65 @@ local function renderWorld()
     end
   end
   for _, m in ipairs(mobs) do
-    local sp = spr[m.def.spr]
+    local sp = mobFrame(m)
     local x, y = m.x - sp.w / 2, m.y - sp.h + 1
     if x + sp.w > camX and x < camX + PW and y + sp.h > camY and y < camY + PH then
-      local bob = (m.moving and (frame + m.phase) % 12 < 6) and -1 or 0
+      local bob = (not ANIM[m.def.spr] and m.moving and (frame + m.phase) % 12 < 6) and -1 or 0
       local tint = nil
       if (m.frozenT or 0) > 0 then tint = S.C
       elseif (m.shockT or 0) > 0 and frame % 4 < 2 then tint = S.Y end
       if m.flash > 0 then tint = S.W end
       if m.fuse and m.fuse % 4 < 2 then tint = S.W end
-      if m.def.ranged and m.cd < 10 and frame % 4 < 2 then tint = S.Y end
       if m.elite and not tint and (frame + m.phase) % 10 < 3 then tint = S.O end
       addDraw(sp, x, y + bob, m.flip, tint, m.y)
     end
   end
-  local psp = playerSpr[min(10, prof.prestige)] or spr.player
-  local pbob = (p.moving and frame % 8 < 4) and -1 or 0
+  local pa = ANIM.playerP[min(10, prof.prestige)] or ANIM.playerP[0]
+  local psp
+  if state == "dying" then psp = pa.death[min(#pa.death, floor(R.dyingT / 5) + 1)]
+  elseif p.moving then psp = pa.walk[floor(p.walkP / 4) % #pa.walk + 1]
+  elseif (p.recoilT or 0) > 0 then psp = pa.recoil[1]
+  else psp = pa.idle[floor(frame / 12) % 2 + 1] end
   local ptint = nil
-  if p.iframes > 0 and frame % 4 < 2 then ptint = S.R end
-  if p.retalT > 0 and frame % 6 < 2 then ptint = S.O end
-  addDraw(psp, floor(p.x + 0.5) - 6, floor(p.y + 0.5) - psp.h + 1 + pbob, p.flip, ptint, p.y)
+  if state ~= "dying" then
+    if p.iframes > 0 and frame % 4 < 2 then ptint = S.R end
+    if p.retalT > 0 and frame % 6 < 2 then ptint = S.O end
+  end
+  -- keep the player on the text-cell grid so its details stay crisp
+  local ppx, ppy = floor(p.x + 0.5) - 6, floor(p.y + 0.5) - psp.h + 1
+  ppx = ppx - (ppx - camX) % 2
+  ppy = ppy - (ppy - camY) % 3
+  addDraw(psp, ppx, ppy, p.flip, ptint, p.y)
   for i = nDraw + 1, #drawList do drawList[i] = nil end
   table.sort(drawList, zsort)
   for i = 1, nDraw do
     local e = drawList[i]
     scr.sprite(e[1], e[2] - camX, e[3] - camY, e[4], e[5])
+  end
+
+  -- muzzle flash
+  if (p.muzT or 0) > 0 and state == "play" then
+    local ca, sa = cos(p.muzA), sin(p.muzA)
+    local mx, my = p.x + ca * 9 - camX, p.y - 7 + sa * 9 - camY
+    scr.pixel(mx, my, S.W)
+    scr.pixel(mx + ca, my + sa, S.Y); scr.pixel(mx + ca * 2, my + sa * 2, S.O)
+    scr.pixel(mx - sa, my + ca, S.Y); scr.pixel(mx + sa, my - ca, S.Y)
+    if p.weapon == 2 or p.weapon == 4 then
+      scr.pixel(mx + ca * 3, my + sa * 3, S.O); scr.pixel(mx + ca - sa, my + sa + ca, S.O); scr.pixel(mx + ca + sa, my + sa - ca, S.O)
+    end
+  end
+  -- explosions: white flash, fire ring, smoke
+  for _, b in ipairs(R.booms) do
+    local t, r = b.t, b.r
+    if t <= 2 then
+      local cr = min(10, r * 0.3 * (t + 1))
+      for yy = -cr, cr, 2 do
+        local hw = sqrt(max(0, cr * cr - yy * yy))
+        for xx = -hw, hw, 2 do scr.pixel(b.x + xx - camX, b.y + yy - camY, (t == 0) and S.W or S.Y) end
+      end
+    end
+    if t >= 1 and t <= 7 then circle(b.x, b.y, r * min(1, t / 5), (t < 4) and { S.Y, S.O } or { S.O, S.R }, 2) end
+    if t >= 5 then circle(b.x, b.y - (t - 5), r * 0.6, { S.D, S.A }, 4) end
   end
 
   -- outpost HP bars
@@ -1925,7 +2050,7 @@ local function renderWorld()
   -- HP bars on elites and nests
   for _, m in ipairs(mobs) do
     if (m.elite or m.def.static) and not m.dead and m.hp < m.maxHp then
-      local sp = spr[m.def.spr]
+      local sp = mobFrame(m)
       local bx, by = floor(m.x - 6 - camX), floor(m.y - sp.h - 2 - camY)
       if bx > -12 and bx < PW and by > 0 and by < PH then
         scr.rect(bx, by, 12, 1, S.K)
@@ -1952,60 +2077,102 @@ local function renderWorld()
 end
 
 ---------------------------------------------------------------------- render: HUD
-local function renderHUD()
-  box(1, 1, CW, 1, S.K)
-  local filled = ceil(p.hp / p.maxHp * 20)
-  T(2, 1, "HP", S.W)
-  local bgs = {}
-  for i = 1, 20 do bgs[i] = HEX[i <= filled and S.R or S.D] end
-  T(5, 1, (" "):rep(20), ("0"):rep(20), table.concat(bgs))
-  local info = ("%d/%d   LV %d   %s   Kills %d   Score %d"):format(ceil(p.hp * 10 - 0.01), floor(p.maxHp * 10 + 0.5), p.level, fmtTime(secs()), R.kills, R.score)
-  T(27, 1, info, S.W)
-  T(82, 1, "DPS " .. fmtNum(R.dps), S.Y)
-  local threat = ("Zombie HP %s (x%.1f)  res %d%%"):format(fmtNum(MOBS.zombie.hp * hpMul(secs())), hpMul(secs()), floor(R.res * 100 + 0.5))
-  T(CW - 18 - #threat, 1, threat, S.O)
-  local who = prof.name .. (prof.prestige > 0 and (" P" .. prof.prestige) or "")
-  T(CW - #who, 1, who, S.Y)
-
-  local frac = min(1, p.xp / p.xpNext)
-  local fillW = floor(frac * CW)
-  local label = ("LEVEL %d   %d / %d XP"):format(p.level, floor(p.xp), p.xpNext)
-  local lx = floor((CW - #label) / 2) + 1
-  local chars, fg2, bg2 = {}, {}, {}
-  for x = 1, CW do
-    local on = x <= fillW
-    local ch = " "
-    if x >= lx and x < lx + #label then ch = label:sub(x - lx + 1, x - lx + 1) end
-    chars[x], fg2[x], bg2[x] = ch, on and "f" or "8", HEX[on and S.C or S.D]
+-- pixel bar in text cells (x, y 1-based cells; w cells wide; 1 row)
+local function hudBar(cx, cy, w, frac, col, hi, back, rows)
+  local x0, y0 = (cx - 1) * 2, (cy - 1) * 3
+  local pw = w * 2
+  local fill = floor(max(0, min(1, frac)) * pw + 0.5)
+  rows = rows or 3
+  scr.rect(x0, y0, pw, 3, S.K)
+  if fill < pw then scr.rect(x0 + fill, y0 + 3 - rows, pw - fill, rows, back or S.D) end
+  if fill > 0 then
+    scr.rect(x0, y0 + 3 - rows, fill, rows, col)
+    if hi and rows >= 2 then scr.rect(x0, y0 + 3 - rows, fill, 1, hi) end
   end
-  T(1, 2, table.concat(chars), table.concat(fg2), table.concat(bg2))
+end
 
-  local row = 4
+local function renderHUD()
+  -- top strip
+  scr.rect(0, 0, PW, 9, S.K)
+  for x = 0, PW - 1 do scr.pixel(x, 9, S.K); scr.pixel(x, 10, (x % 4 < 2) and S.D or S.K) end
+  -- HP: heart + bar + numbers
+  scr.sprite(spr.hud_heart, 4, 0)
+  local low = p.hp < p.maxHp * 0.3
+  local hcol = (low and frame % 10 < 5) and S.O or S.R
+  hudBar(7, 1, 40, p.hp / p.maxHp, hcol, S.O, S.D)
+  T(48, 1, ("%d / %d"):format(ceil(p.hp * 10 - 0.01), floor(p.maxHp * 10 + 0.5)), low and S.O or S.W, S.K)
+  -- level + XP
+  T(2, 3, "LV", S.A, S.K)
+  T(5, 3, tostring(p.level), S.Y, S.K)
+  hudBar(7, 2, 40, p.xp / p.xpNext, S.C, S.W, S.D, 2)
+  T(48, 2, ("%d / %d xp"):format(floor(p.xp), p.xpNext), S.A, S.K)
+  -- timer (big pixel digits) + kills
+  local tt = fmtTime(secs())
+  local tw = Scn.bigWidth(tt, 1)
+  Scn.bigText(tt, floor((PW - tw) / 2), 1, 1, S.W, nil, false)
+  local kills = tostring(R.kills)
+  local kpx = floor((PW + tw) / 2) + 8
+  kpx = kpx - kpx % 2
+  scr.sprite(spr.hud_skull, kpx, 0)
+  T(kpx / 2 + 6, 1, kills, S.W, S.K)
+  T(kpx / 2 + 6, 2, "kills", S.D, S.K)
+  -- right side: score, dps, threat, player
+  local who = prof.name .. (prof.prestige > 0 and (" P" .. prof.prestige) or "")
+  T(CW - #who, 1, who, S.Y, S.K)
+  local sc = "Score " .. R.score
+  T(CW - #who - #sc - 3, 1, sc, S.W, S.K)
+  local dps = "DPS " .. fmtNum(R.dps)
+  T(CW - #dps, 2, dps, S.Y, S.K)
+  local threat = ("Zombie HP %s  x%.1f  res %d%%"):format(fmtNum(MOBS.zombie.hp * hpMul(secs())), hpMul(secs()), floor(R.res * 100 + 0.5))
+  T(CW - #dps - #threat - 3, 2, threat, S.O, S.K)
+
+  local row = 5
   if R.boss and not R.boss.dead then
-    local bw = min(CW - 30, 100)
+    local bw = min(CW - 40, 90)
     local bx = floor((CW - bw) / 2) + 1
-    T(bx - 13, 3, " GRAVE KING ", S.W, S.R)
-    local bf = floor(max(0, R.boss.hp) / R.boss.maxHp * bw)
-    T(bx, 3, (" "):rep(bw), S.W, S.D)
-    if bf > 0 then T(bx, 3, (" "):rep(bf), S.W, S.R) end
-    row = 5
+    scr.rect((bx - 15) * 2, 12, (bw + 16) * 2, 3, S.K)
+    scr.sprite(spr.hud_skull, (bx - 14) * 2, 12)
+    T(bx - 10, 5, "GRAVE KING", S.R, S.K)
+    hudBar(bx, 5, bw, max(0, R.boss.hp) / R.boss.maxHp, S.R, S.O, S.D, 2)
+    row = 7
   end
   if UI.msgTimer > 0 and UI.msg ~= "" then center(row, " " .. UI.msg .. " ", UI.msgCol, S.K) end
 
-  box(1, CH, CW, 1, S.K)
-  local x = 2
+  -- weapon slots (bottom centre)
+  local slotW, gap = 12, 2
+  local total = 4 * slotW + 3 * gap
+  local sx0 = floor((CW - total) / 2) + 1
+  local sy = CH - 2
   for i = 1, 4 do
-    local lbl = " " .. i .. " " .. (p.unlocked[i] and WEAPONS[i].name or "-----") .. " "
-    if i == p.weapon then T(x, CH, lbl, S.K, S.Y)
-    else T(x, CH, lbl, p.unlocked[i] and S.W or S.D, S.K) end
-    x = x + #lbl + 1
+    local x = sx0 + (i - 1) * (slotW + gap)
+    local un = p.unlocked[i]
+    local act = i == p.weapon
+    local fc = act and S.Y or (un and S.A or S.D)
+    -- interior: number + weapon picture
+    T(x, sy, tostring(i), act and S.Y or (un and S.W or S.D), S.K)
+    T(x, sy + 1, " ", S.W, S.K)
+    scr.rect(x * 2, (sy - 1) * 3, (slotW - 1) * 2, 6, S.K)
+    if un then scr.sprite(spr["hud_w" .. i], x * 2 + 2, (sy - 1) * 3, false, (not act) and S.A or nil)
+    else T(x + 3, sy, "----", S.D, S.K) end
+    Scn.frame((x - 2) * 2, (sy - 2) * 3, (slotW + 2) * 2, 4 * 3, fc, act)
   end
-  local extra = ""
-  if stats.shield >= 1 then extra = extra .. ((p.shieldT >= C.shieldCd()) and "SHIELD UP   " or "shield ...   ") end
-  if stats.revive >= 1 then extra = extra .. ("Revives %d   "):format(floor(stats.revive + 0.5) - p.revUsed) end
-  if #R.followers > 0 then extra = extra .. ("Followers %d/2   "):format(#R.followers) end
-  T(x + 2, CH, extra, S.C)
-  T(CW - 30, CH, "H numbers   P pause / build", S.A)
+  -- status (left of the slots) + hints (right)
+  local st = {}
+  if stats.shield >= 1 then st[#st + 1] = { (p.shieldT >= C.shieldCd()) and "SHIELD" or "shield", (p.shieldT >= C.shieldCd()) and S.C or S.D } end
+  if stats.revive >= 1 then st[#st + 1] = { "REVIVE " .. (floor(stats.revive + 0.5) - p.revUsed), S.Y } end
+  if #R.followers > 0 then st[#st + 1] = { "ALLIES " .. #R.followers .. "/2", S.g } end
+  local x = sx0 - 4
+  for i = #st, 1, -1 do
+    x = x - #st[i][1] - 2
+    T(x, CH - 1, " " .. st[i][1] .. " ", st[i][2], S.K)
+  end
+  T(sx0 + total + 3, CH - 1, " H numbers   P pause / build ", S.A, S.K)
+
+  -- red screen edge when hurt
+  if p.iframes > 0 and p.iframes % 6 < 3 and state == "play" then
+    for x = 0, PW - 1, 2 do scr.pixel(x, PH - 1, S.R); scr.pixel(x + 1, 11, S.R) end
+    for y = 11, PH - 1, 2 do scr.pixel(0, y, S.R); scr.pixel(PW - 1, y + 1, S.R) end
+  end
 end
 
 ---------------------------------------------------------------------- render: overlays
@@ -2630,6 +2797,11 @@ local function main()
       frame = frame + 1
       if state == "play" then update() end
       if state == "dead" then R.deadTimer = R.deadTimer + 1 end
+      if state == "dying" then
+        R.dyingT = R.dyingT + 1
+        C.updateFx()
+        if R.dyingT >= 44 then C.finishRun() end
+      end
       if state ~= "play" and UI.msgTimer > 0 then UI.msgTimer = UI.msgTimer - 1 end
       if UI.prestigeArm > 0 then UI.prestigeArm = UI.prestigeArm - 1 end
       render()

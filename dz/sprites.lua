@@ -426,4 +426,54 @@ S.sparkle = {
   ".CC",
 }
 
+-- HUD weapon icons (16x6)
+S.hud_w1 = {
+  ".....KKKKKKKKKK.",
+  ".....KAAAAAAAAAK",
+  ".....KKKDDDDDDK.",
+  ".......KDDKKKK..",
+  "......KDDK......",
+  "......KKK.......",
+}
+S.hud_w2 = {
+  "KKKK.KKKKKKKKKKK",
+  "KBBBKKAAAAAAAAAK",
+  "KBBBBKDDDDDDDDK.",
+  ".KBBBKKNNNK.....",
+  "..KKK..KKK......",
+  "................",
+}
+S.hud_w3 = {
+  "...KKKKKKKKKKK..",
+  "..KAAAAAAAAAAAK.",
+  "KKKDDDDDDDDDKKK.",
+  "KDDKKDDKKKK.....",
+  "KKK..KDDK.......",
+  ".....KKKK.......",
+}
+S.hud_w4 = {
+  ".KKKKKKKKKKKKKK.",
+  "KUUUUUUUUUUUUURK",
+  "KUUUUUUUUUUUURRK",
+  ".KKKKBBKKKKKKKK.",
+  "....KBBK........",
+  "....KKKK........",
+}
+S.hud_heart = {
+  ".RR.RR.",
+  "RWRRRRR",
+  "RRRRRRR",
+  ".RRRRR.",
+  "..RRR..",
+  "...R...",
+}
+S.hud_skull = {
+  ".WWWWW.",
+  "WWWWWWW",
+  "WKKWKKW",
+  "WWWKWWW",
+  ".WWWWW.",
+  ".W.W.W.",
+}
+
 return S
