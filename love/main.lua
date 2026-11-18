@@ -6,8 +6,9 @@
 -- Rows are decoded on the GPU by a small shader, and touch controls are
 -- turned into the key events the game already understands.
 
-local CW, CH = 128, 54            -- text cells the game draws into (2x3 pixels each)
+local CW, CH = 164, 54            -- text cells the game draws into (2x3 pixels each); CW follows the screen shape
 local IS_MOBILE = love.system.getOS() == "Android" or love.system.getOS() == "iOS"
+_G.DZ_TOUCH = IS_MOBILE or os.getenv("DZ_TOUCH") ~= nil   -- game shows touch hints instead of key hints
 
 ---------------------------------------------------------------------- CC key codes
 keys = {
@@ -28,7 +29,7 @@ colours.gray, colours.lightGray = colours.grey, colours.lightGrey
 colors = colours
 
 ---------------------------------------------------------------------- screen (fake monitor)
-local cellData = love.image.newImageData(CW, CH)
+local cellData
 local cellImg, palData, palImg, glyphs, shader
 local cellsDirty = true
 local palette = {}
@@ -296,28 +297,6 @@ local function buttonsFor(state)
       B[#B + 1] = button("", keys[({ "one", "two", "three", "four" })[i]], gx + (cx - 1) * 2 * scale, gy + (CH - 4) * 3 * scale,
         (slotW + 2) * 2 * scale, 4 * 3 * scale, true)
     end
-  elseif state == "pick" then
-    B[#B + 1] = button("REROLL", keys.r, pad, H - bh - pad, bw, bh)
-    B[#B + 1] = button("BANISH", keys.b, W - bw - pad, H - bh - pad, bw, bh)
-  elseif state == "paused" then
-    col({ { "RESUME", keys.p } }, rx)
-    B[#B + 1] = button("END RUN", keys.q, rx, H - bh - pad, bw, bh)   -- far from RESUME on purpose
-  elseif state == "title" then
-    col({ { "PLAY", keys.space }, { "SKILL TREE", keys.t }, { "NAME", keys.n }, { "NOTES", keys.v } }, rx)
-  elseif state == "naming" then
-    col({ { "OK", keys.enter }, { "CANCEL", keys.tab } }, rx)
-  elseif state == "dead" then
-    col({ { "NEW RUN", keys.space }, { "SKILL TREE", keys.t }, { "TITLE", keys.q } }, rx)
-  elseif state == "notes" then
-    col({ { "UP", keys.up }, { "DOWN", keys.down }, { "BACK", keys.q } }, rx)
-  elseif state == "tree" then
-    col({ { "BUY", keys.space }, { "BACK", keys.q }, { "PRESTIGE", keys.x } }, rx)
-    local s = bh
-    local cx, cy = pad + s * 1.5, H - pad - s * 1.5
-    B[#B + 1] = button("^", keys.up, cx - s / 2, cy - s * 1.5, s, s)
-    B[#B + 1] = button("v", keys.down, cx - s / 2, cy + s * 0.5, s, s)
-    B[#B + 1] = button("<", keys.left, cx - s * 1.5, cy - s / 2, s, s)
-    B[#B + 1] = button(">", keys.right, cx + s * 0.5, cy - s / 2, s, s)
   end
   return B
 end
@@ -371,6 +350,10 @@ end
 ---------------------------------------------------------------------- LÖVE callbacks
 function love.load()
   love.graphics.setDefaultFilter("nearest", "nearest")
+  local sw, sh = love.graphics.getDimensions()
+  if sw < sh then sw, sh = sh, sw end   -- always landscape
+  CW = math.max(128, math.min(200, math.floor(CH * 3 * sw / sh / 2)))
+  cellData = love.image.newImageData(CW, CH)
   layout()
   palData = love.image.newImageData(16, 1)
   for i = 0, 15 do local p = palette[i]; palData:setPixel(i, 0, p[1], p[2], p[3], 1) end
@@ -448,7 +431,7 @@ function love.draw()
   -- sticks
   if st == "play" then
     local R = stickRadius()
-    local hint = { move = { W * 0.12, H * 0.72 }, aim = { W * 0.88, H * 0.72 } }
+    local hint = { move = { R * 1.35, H - R * 1.35 }, aim = { W - R * 1.35, H - R * 1.35 } }
     local active = {}
     for _, s in pairs(sticks) do active[s.kind] = s end
     for _, kind in ipairs({ "move", "aim" }) do
@@ -459,13 +442,25 @@ function love.draw()
       local dx, dy = kx - ox, ky - oy
       local d = math.sqrt(dx * dx + dy * dy)
       if d > R then kx, ky = ox + dx / d * R, oy + dy / d * R end
-      love.graphics.setColor(1, 1, 1, s and 0.22 or 0.08)
+      -- base: dark disc, bright rim, 8 notches
+      love.graphics.setColor(0, 0, 0, s and 0.35 or 0.2)
       love.graphics.circle("fill", ox, oy, R)
-      love.graphics.setColor(1, 1, 1, s and 0.5 or 0.18)
-      love.graphics.setLineWidth(3)
+      love.graphics.setLineWidth(math.max(2, R * 0.05))
+      love.graphics.setColor(1, 1, 1, s and 0.55 or 0.25)
       love.graphics.circle("line", ox, oy, R)
-      love.graphics.setColor(kind == "aim" and 1 or 0.7, kind == "aim" and 0.55 or 0.85, kind == "aim" and 0.3 or 1, s and 0.75 or 0.25)
+      for k = 0, 7 do
+        local a = k * math.pi / 4
+        love.graphics.line(ox + math.cos(a) * R * 0.8, oy + math.sin(a) * R * 0.8, ox + math.cos(a) * R * 0.92, oy + math.sin(a) * R * 0.92)
+      end
+      -- knob: coloured cap with a highlight
+      local r1, g1, b1 = 0.36, 0.62, 0.95
+      if kind == "aim" then r1, g1, b1 = 0.95, 0.45, 0.2 end
+      love.graphics.setColor(0, 0, 0, s and 0.5 or 0.25)
+      love.graphics.circle("fill", kx + R * 0.04, ky + R * 0.06, R * 0.4)
+      love.graphics.setColor(r1, g1, b1, s and 0.95 or 0.45)
       love.graphics.circle("fill", kx, ky, R * 0.38)
+      love.graphics.setColor(1, 1, 1, s and 0.45 or 0.2)
+      love.graphics.circle("fill", kx - R * 0.1, ky - R * 0.1, R * 0.14)
       if not s then
         love.graphics.setFont(smallFont)
         love.graphics.setColor(1, 1, 1, 0.35)
@@ -477,11 +472,6 @@ function love.draw()
   local pressed = {}
   for _, b in pairs(pressedBtn) do pressed[b.label] = true end
   for _, b in ipairs(buttonsFor(st)) do if not b.invisible then drawButton(b, pressed[b.label]) end end
-  if st == "pick" then
-    love.graphics.setFont(smallFont)
-    love.graphics.setColor(1, 1, 1, 0.6)
-    love.graphics.printf("tap a card to pick it", 0, H - smallFont:getHeight() - H * 0.02, W, "center")
-  end
 
   if crash then
     love.graphics.setColor(0, 0, 0, 0.85)

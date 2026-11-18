@@ -2,9 +2,17 @@
 
 local N = {}
 
-N.VERSION = "v3.32"
+N.VERSION = "v3.33"
 
 N.LIST = {
+  { "v3.33", "Real menu buttons", {
+    "Title, death, pause, skill tree, notes and name screens have buttons",
+    "  click/tap them (right-click the monitor on the server),",
+    "  or move with the arrow keys and press ENTER - hotkeys still work",
+    "Level up: arrows + ENTER pick a card, REROLL / BANISH are buttons",
+    "Skill tree: tap a card to select it, tap again (or BUY) to buy",
+    "Android: always landscape, full screen, new thumbsticks, touch hints",
+  } },
   { "v3.32", "Android version", {
     "DEAD ZONE now also runs as an Android app (LÖVE), same game",
     "  touch: left stick moves, right stick aims + shoots,",

@@ -431,7 +431,7 @@ local function newRun()
   R.banishes = floor(stats.banish + 0.5)
   p.bonus = floor(stats.headstart + 0.5)
   UI.shake = 0
-  say("Survive!  WASD move, SPACE shoot", 80, S.W)
+  say(_G.DZ_TOUCH and "Survive!" or "Survive!  WASD move, SPACE shoot", 80, S.W)
 end
 
 ---------------------------------------------------------------------- particles
@@ -1925,6 +1925,7 @@ end
 function C.offerCount() return max(3, min(4, floor(stats.choices + 0.5))) end
 
 function C.startPick(kind)
+  UI.cardSel = 1
   R.offerKind = kind
   R.banishMode = false
   R.offers = I.roll(owned, stats.luck, C.offerCount(), kind == "chest" and "epic" or nil, R.banned, nil, BIOME_FAVOR[R.biome or "plains"])
@@ -3143,13 +3144,40 @@ function V.renderHUD()
     x = x - #st[i][1] - 2
     T(x, CH - 1, " " .. st[i][1] .. " ", st[i][2], S.K)
   end
-  T(sx0 + total + 3, CH - 1, " H numbers   P pause / build ", S.A, S.K)
+  if not _G.DZ_TOUCH then T(sx0 + total + 3, CH - 1, " H numbers   P pause / build ", S.A, S.K) end
 
   -- red screen edge when hurt
   if p.iframes > 0 and p.iframes % 6 < 3 and state == "play" then
     for x = 0, PW - 1, 2 do scr.pixel(x, PH - 1, S.R); scr.pixel(x + 1, 11, S.R) end
     for y = 11, PH - 1, 2 do scr.pixel(0, y, S.R); scr.pixel(PW - 1, y + 1, S.R) end
   end
+end
+
+---------------------------------------------------------------------- menu buttons
+-- A button is a framed label. Tap / right-click it, or pick it with the arrow
+-- keys + ENTER. Its hotkey still works too. Buttons are registered while
+-- drawing, so UI.btns always matches what's on screen.
+function V.btn(x, y, w, label, key, col, tall)
+  UI.nb = (UI.nb or 0) + 1
+  local i = UI.nb
+  local b = UI.btns[i]
+  if not b then b = {}; UI.btns[i] = b end
+  -- on touch screens buttons are 3 rows tall (bigger targets), label row = y
+  local hh = ((_G.DZ_TOUCH and tall ~= false) or tall) and 1 or 0
+  b[1], b[2], b[3], b[4], b.key = x - 1, y - 1 - hh, x + w, y + 1 + hh, key
+  local sel = UI.bsel == i and not _G.DZ_TOUCH
+  local fc = sel and ((frame % 10 < 6) and S.Y or S.O) or (col or S.A)
+  -- the frame is drawn with teletext characters in the text layer, so it shows
+  -- on top of panels too (bottom-right sub-pixel of a cell is always background)
+  local o, f = HEX[UI.tbg], HEX[fc]
+  local ch = string.char
+  local mid = ch(128 + 21) .. (" "):rep(w) .. ch(128 + 21)
+  local midF, midB = o .. o:rep(w) .. f, f .. o:rep(w) .. o
+  T(x - 1, y - 1 - hh, ch(128 + 31) .. ch(128 + 15):rep(w) .. ch(128 + 16), o .. o:rep(w) .. f, f .. f:rep(w) .. o)
+  for yy = y - hh, y + hh do T(x - 1, yy, mid, midF, midB) end
+  T(x - 1, y + 1 + hh, ch(128 + 2) .. ch(128 + 3):rep(w) .. ch(128 + 1), f .. f:rep(w) .. f, o .. o:rep(w) .. o)
+  local lab = sel and ("> " .. label .. " <") or label
+  T(x + floor((w - #lab) / 2), y, lab, sel and S.Y or S.W, UI.tbg)
 end
 
 ---------------------------------------------------------------------- render: overlays
@@ -3231,6 +3259,7 @@ function V.drawPickCard(it, i, x0, y0, w, h)
   local rar = I.RARITY[it.rarity]
   local rc = P.slot[rar.col]
   local fc = R.banishMode and ((frame % 10 < 5) and S.R or S.D) or RARFRAME[it.rarity]
+  if UI.cardSel == i and not _G.DZ_TOUCH and frame % 10 < 6 then fc = S.W end
   local legend = it.rarity == "legendary" or it.rarity == "military"
   local px0, py0 = (x0 - 1) * 2, (y0 - 1) * 3
   local pw, ph = w * 2, h * 3
@@ -3355,10 +3384,21 @@ function V.renderPick()
     UI.cardRects = UI.cardRects or {}
     UI.cardRects[i] = { x0, cy, x0 + cardW - 1, cy + cardH - 1 }
   end
-  local keysTxt = (n == 4) and "1 2 3 4  pick" or "1 2 3  pick"
-  if R.rerolls > 0 and R.offerKind ~= "armory" then keysTxt = keysTxt .. "      R reroll (" .. R.rerolls .. ")" end
-  if R.banishes > 0 and R.offerKind ~= "armory" then keysTxt = keysTxt .. "      B banish (" .. R.banishes .. ")" end
+  local keysTxt = _G.DZ_TOUCH and "tap a card to pick it" or (((n == 4) and "1 2 3 4" or "1 2 3") .. "  or  arrows + ENTER  pick")
   center(cy + cardH + 1, " " .. keysTxt .. " ", S.W, S.K)
+  if R.offerKind ~= "armory" and R.pickT > 12 then
+    local side = floor((CW - total) / 2)
+    local bl = R.banishMode and "CANCEL" or ("BANISH " .. R.banishes)
+    if side >= 20 then
+      local by = cy + floor(cardH / 2)
+      if R.rerolls > 0 then V.btn(floor(side / 2) - 7, by, 14, "REROLL " .. R.rerolls, keys.r, S.C) end
+      if R.banishes > 0 then V.btn(CW - floor(side / 2) - 6, by, 14, bl, keys.b, S.R) end
+    else
+      local mid = floor(CW / 2)
+      if R.rerolls > 0 then V.btn(mid - 20, cy + cardH + 3, 16, "REROLL " .. R.rerolls, keys.r, S.C, false) end
+      if R.banishes > 0 then V.btn(mid + 5, cy + cardH + 3, 16, bl, keys.b, S.R, false) end
+    end
+  end
 end
 
 function V.renderPause()
@@ -3381,7 +3421,8 @@ function V.renderPause()
     T(x0 + 78, y0 + 4, ("total %s   now %s/s"):format(fmtNum(total), fmtNum(R.dps)), S.Y)
     for i, l in ipairs(lines) do T(x0 + 78, y0 + 5 + i, l, S.W) end
   end
-  center(y0 + 26, "P / SPACE resume      Q end run", S.W)
+  V.btn(x0 + floor(w / 2) - 22, y0 + 25, 16, "RESUME", keys.p, S.g)
+  V.btn(x0 + floor(w / 2) + 6, y0 + 25, 16, "END RUN", keys.q, S.R)
 end
 
 function V.renderDead()
@@ -3413,7 +3454,11 @@ function V.renderDead()
   local lines, total = V.sourceLines(7)
   center(y0 + 16, "DAMAGE BY SOURCE   (total " .. fmtNum(total) .. ")", S.A)
   for i, l in ipairs(lines) do center(y0 + 17 + i, l, S.W) end
-  if R.deadTimer > 30 then center(y0 + 27, "SPACE new run     T skill tree     Q title", S.g) end
+  if R.deadTimer > 30 then
+    V.btn(x0 + 6, y0 + 27, 16, "NEW RUN", keys.space, S.g)
+    V.btn(x0 + 28, y0 + 27, 16, "SKILL TREE", keys.t, S.C)
+    V.btn(x0 + 50, y0 + 27, 16, "TITLE", keys.q)
+  end
 end
 
 function V.renderTitle()
@@ -3424,28 +3469,36 @@ function V.renderTitle()
   Scn.logo(floor((PW - Scn.logoW) / 2), (top - 1) * 3 + 2, frame)
   Scn.panel(x0, y0, w, h, S.R, true)
   center(y0 + 1, "survive the endless undead", S.A)
-  local lines = {
+  local lines = _G.DZ_TOUCH and {
+    "LEFT STICK      move",
+    "RIGHT STICK     aim + shoot",
+    "TAP A SLOT      switch weapon",
+    "TAP A CARD      pick item on level up",
+    "II              pause / see your build",
+  } or {
     "WASD        move",
     "SPACE       shoot (hold)",
     "ARROWS      aim + shoot",
     "1 2 3 4     switch weapon",
-    "1 2 3       pick item on level up",
+    "1 2 3       pick item  (ENTER / tap)",
     "R / B       reroll / banish items",
     "P           pause / see your build",
   }
   for i, l in ipairs(lines) do T(x0 + 13, y0 + 2 + i, l, S.W) end
-  if frame % 20 < 14 then center(y0 + 11, "SPACE  start run", S.g) end
-  center(y0 + 12, "T  skill tree", S.C)
-  center(y0 + 13, "N  type a name to log in", S.A)
-  center(y0 + 14, "V  patch notes", S.A)
-  center(y0 + 15, "Q  quit", S.A)
+  -- menu buttons
+  local list = { { "PLAY", keys.space, S.g }, { "SKILL TREE", keys.t, S.C }, { "NAME", keys.n }, { "NOTES", keys.v } }
+  if not _G.DZ_TOUCH then list[#list + 1] = { "QUIT", keys.q } end
+  local bws, total = {}, 0
+  for i, e in ipairs(list) do bws[i] = #e[1] + 4; total = total + bws[i] + 3 end
+  local bx = x0 + floor((w - total + 3) / 2)
+  for i, e in ipairs(list) do V.btn(bx, y0 + 12, bws[i], e[1], e[2], e[3]); bx = bx + bws[i] + 3 end
   T(x0 + w - #Notes.VERSION - 1, y0 + h - 1, Notes.VERSION, S.D)
   if detector then
-    center(y0 + 17, "Player Detector: connected", S.g)
-    center(y0 + 18, "Stand next to it (or right-click it) to log in", S.Y)
-  else
-    center(y0 + 17, "Player Detector: not found", S.R)
-    center(y0 + 18, "It must touch the computer (or use a wired modem)", S.A)
+    center(y0 + 16, "Player Detector: connected", S.g)
+    center(y0 + 17, "Stand next to it (or right-click it) to log in", S.Y)
+  elseif not _G.DZ_TOUCH then
+    center(y0 + 16, "Player Detector: not found", S.R)
+    center(y0 + 17, "It must touch the computer (or use a wired modem)", S.A)
   end
 
   -- left: profile
@@ -3499,17 +3552,21 @@ function V.renderNotes()
     local l = lines[i + UI.notesScroll]
     if l then T(x0 + 3, y0 + 2 + i, l[1]:sub(1, w - 6), l[2]) end
   end
-  center(y0 + h - 2, "W/S or arrows scroll        V or Q back", S.A)
+  local bx = x0 + w - 44
+  V.btn(bx, y0 + h - 2, 10, "UP", keys.w)
+  V.btn(bx + 13, y0 + h - 2, 10, "DOWN", keys.s)
+  V.btn(bx + 26, y0 + h - 2, 12, "BACK", keys.q, S.C)
 end
 
 function V.renderNaming()
-  local w, h = 50, 9
+  local w, h = 50, 10
   local x0, y0 = floor((CW - w) / 2) + 1, floor((CH - h) / 2) + 1
   Scn.panel(x0, y0, w, h, S.Y, true)
   center(y0 + 1, "TYPE YOUR NAME", S.Y)
   local shown = UI.nameBuf .. ((frame % 10 < 5) and "_" or " ")
   center(y0 + 4, shown, S.W)
-  center(y0 + 7, "ENTER confirm     TAB cancel", S.A)
+  V.btn(x0 + 8, y0 + 7, 12, "OK", keys.enter, S.g)
+  V.btn(x0 + w - 20, y0 + 7, 12, "CANCEL", keys.tab)
 end
 
 ---------------------------------------------------------------------- render: skill tree
@@ -3620,11 +3677,16 @@ function V.renderTree()
 
   -- cards (selected one last so it sits on top)
   local selCard
+  UI.treeRects, UI.treeN = UI.treeRects or {}, 0
   for _, n in ipairs(Tree.NODES) do
     local cx, cy = cellOf(n)
     local x0, y0 = cx - floor(CARD_W / 2), cy - 2
     if x0 + CARD_W >= 1 and x0 <= CW and y0 >= 2 and y0 + CARD_H - 1 <= bottomRow then
       if n.id == UI.treeSel then selCard = { n, x0, y0 } else V.drawCard(n, x0, y0, false) end
+      UI.treeN = UI.treeN + 1
+      local tr = UI.treeRects[UI.treeN]
+      if not tr then tr = {}; UI.treeRects[UI.treeN] = tr end
+      tr[1], tr[2], tr[3], tr[4], tr.id = x0, y0, x0 + CARD_W - 1, y0 + CARD_H - 1, n.id
     end
   end
   if selCard then V.drawCard(selCard[1], selCard[2], selCard[3], true) end
@@ -3663,14 +3725,21 @@ function V.renderTree()
   if Tree.allMaxed(lv) and pr < Tree.MAX_PRESTIGE then
     T(tx, py + 6, "EVERYTHING MAXED  -  press X to PRESTIGE", (frame % 10 < 6) and S.Y or S.O)
   end
-  local keysTxt = "WASD/arrows move    SPACE buy    X prestige    Q back"
+  local bx = CW - 30
+  if Tree.allMaxed(lv) and pr < Tree.MAX_PRESTIGE then bx = CW - 47; V.btn(CW - 17, py + 1, 12, "PRESTIGE", keys.x, S.O) end
+  V.btn(bx, py + 1, 10, "BUY", keys.space, S.g)
+  V.btn(bx + 13, py + 1, 10, "BACK", keys.q)
+  local keysTxt = _G.DZ_TOUCH and "tap a card to select it" or "WASD/arrows move  SPACE buy  X prestige  Q back"
   T(CW - #keysTxt - 3, py + 6, keysTxt, S.A)
   if UI.msgTimer > 0 then center(py - 3, " " .. UI.msg .. " ", UI.msgCol, S.K) end
 end
 
 local MENU = { title = true, naming = true, notes = true, dead = true, tree = true }
 local function render()
-  _G.DZ_STATE = state   -- lets a touch front-end (LÖVE port) show the right buttons
+  _G.DZ_STATE = state   -- lets a touch front-end (LÖVE port) show the right controls
+  UI.nb = 0
+  UI.btns = UI.btns or {}
+  if UI.bstate ~= state then UI.bstate, UI.bsel, UI.cardSel = state, 1, 1 end
   if MENU[state] then
     if P.current ~= "night" then P.use("night"); P.apply(out) end
     UI.tbg = FACE
@@ -3711,6 +3780,26 @@ function V.toTitle()
 end
 
 local function onKey(k)
+  -- arrows + ENTER drive the on-screen buttons on menu screens
+  if (state == "title" or state == "dead" or state == "paused") and (UI.nb or 0) > 0 then
+    if k == keys.left or k == keys.up then UI.bsel = ((UI.bsel or 1) - 2) % UI.nb + 1 return
+    elseif k == keys.right or k == keys.down then UI.bsel = (UI.bsel or 1) % UI.nb + 1 return
+    elseif k == keys.enter then
+      local b = UI.btns[UI.bsel or 1]
+      if b and (state ~= "dead" or R.deadTimer > 30) then V.press(b.key) end
+      return
+    end
+  end
+  if state == "pick" and R.offers then
+    local n = #R.offers
+    if k == keys.left then UI.cardSel = ((UI.cardSel or 1) - 2) % n + 1 return
+    elseif k == keys.right then UI.cardSel = (UI.cardSel or 1) % n + 1 return
+    elseif k == keys.enter and (R.pickT or 0) >= 16 then C.choose(UI.cardSel or 1) return end
+  end
+  V.press(k)
+end
+
+function V.press(k)
   if state == "title" then
     if k == keys.space or k == keys.enter then V.startRun()
     elseif k == keys.t then state = "tree"
@@ -3769,6 +3858,20 @@ end
 
 -- touch / click on the game picture (monitor right-click in CC, finger on a phone)
 function V.onTouch(x, y)
+  for i = 1, UI.nb or 0 do
+    local b = UI.btns[i]
+    if x >= b[1] and x <= b[3] and y >= b[2] and y <= b[4] then V.press(b.key) return end
+  end
+  if state == "tree" then
+    for i = UI.treeN or 0, 1, -1 do
+      local r = UI.treeRects[i]
+      if x >= r[1] and x <= r[3] and y >= r[2] and y <= r[4] then
+        if UI.treeSel == r.id then TR.buy() else UI.treeSel = r.id end
+        return
+      end
+    end
+    return
+  end
   if state == "pick" and R.offers and (R.pickT or 0) >= 16 then   -- ignore taps while the cards deal in
     for i = 1, #R.offers do
       local r = UI.cardRects and UI.cardRects[i]
