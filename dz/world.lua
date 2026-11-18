@@ -22,6 +22,8 @@ local MBW, MBH = 2400, 2400       -- one military base chance per region of this
 local BASE_HW, BASE_HH = 130, 95  -- half size of a base compound
 local WALL = 6                    -- wall thickness
 local GATE = 22                   -- half width of a gate
+local CMW, CMH = 3200, 3200       -- one cemetery chance per region of this size
+local CEM_HW, CEM_HH = 118, 88
 
 -- Biomes come from two smooth noise maps, temperature and humidity (like
 -- Minecraft). Temperature changes gradually, so cold and hot biomes always
@@ -282,7 +284,28 @@ function W.new(spr, seed)
   local viewBases, nvb = {}, 0
   -- concrete floor with tile seams, walls dark with a light top edge
   -- each base is rasterised once into a colour table (walls, floor, seams)
+  local function rasteriseCem(b)
+    local r, bw = {}, b.x1 - b.x0
+    for yy = 0, b.y1 - b.y0 - 1 do
+      for xx = 0, bw - 1 do
+        local x, y = b.x0 + xx, b.y0 + yy
+        local hv = (x * 31 + y * 17) % 23
+        local c = (hv == 0) and s.D or ((hv == 7) and s.N or s.B)
+        for _, w in ipairs(b.walls) do
+          if not w.crypt and x >= w[1] and x < w[3] and y >= w[2] and y < w[4] then
+            -- iron fence: posts every 5 px, rails between
+            local post = (w[3] - w[1] > w[4] - w[2]) and ((x - w[1]) % 5 == 0) or ((y - w[2]) % 5 == 0)
+            c = post and s.K or (((y - w[2]) == 1 or (x - w[1]) == 1) and s.A or s.K)
+            break
+          end
+        end
+        r[yy * bw + xx] = c
+      end
+    end
+    b.raster, b.bw = r, bw
+  end
   local function rasterise(b)
+    if b.kind == "cemetery" then return rasteriseCem(b) end
     local r, bw = {}, b.x1 - b.x0
     for yy = 0, b.y1 - b.y0 - 1 do
       for xx = 0, bw - 1 do
@@ -563,7 +586,7 @@ function W.new(spr, seed)
       local y = by * MBH + 320 + floor(hash(bx, by, 503) * (MBH - 640))
       if x * x + y * y > 1800 * 1800 and waterEdge(x, y) > 220 then
         local x0, y0, x1, y1 = x - BASE_HW, y - BASE_HH, x + BASE_HW, y + BASE_HH
-        b = { key = key, x = x, y = y, x0 = x0, y0 = y0, x1 = x1, y1 = y1, walls = {
+        b = { kind = "base", key = key, x = x, y = y, x0 = x0, y0 = y0, x1 = x1, y1 = y1, walls = {
           { x0, y0, x1, y0 + WALL },                                        -- north
           { x0, y1 - WALL, x - GATE, y1 }, { x + GATE, y1 - WALL, x1, y1 },   -- south + gate
           { x0, y0, x0 + WALL, y - GATE }, { x0, y + GATE, x0 + WALL, y1 },   -- west + gate
@@ -574,12 +597,67 @@ function W.new(spr, seed)
     baseCache[key] = b
     return b
   end
+  -- cemeteries: small iron-fenced graveyards with a crypt, gaps N and S
+  W.CEM_LAYOUT = {
+    archers = { { -80, -50 }, { 80, -50 }, { -90, 40 }, { 90, 40 }, { -30, -66 }, { 30, -66 } },
+    pikes = { { -50, -20 }, { 50, -20 }, { -50, 30 }, { 50, 30 }, { 0, 48 } },
+    shields = { { -20, -40 }, { 20, -40 }, { -70, 0 }, { 70, 0 }, { -20, 30 }, { 20, 30 } },
+  }
+  local cemCache = {}
+  local function cemAt(cx, cy)
+    local key = cx * 65536 + cy + 7e9
+    local c = cemCache[key]
+    if c ~= nil then return c end
+    c = false
+    if hash(cx, cy, 601) < 0.35 then
+      local x = cx * CMW + 300 + floor(hash(cx, cy, 602) * (CMW - 600))
+      local y = cy * CMH + 300 + floor(hash(cx, cy, 603) * (CMH - 600))
+      if x * x + y * y > 2500 * 2500 and waterEdge(x, y) > 200 then
+        -- keep away from military bases
+        local ok = true
+        local bx, by = floor(x / MBW), floor(y / MBH)
+        for yy = by - 1, by + 1 do for xx = bx - 1, bx + 1 do
+          local b = baseAt(xx, yy)
+          if b and (b.x - x) ^ 2 + (b.y - y) ^ 2 < 700 * 700 then ok = false end
+        end end
+        if ok then
+          local x0, y0, x1, y1 = x - CEM_HW, y - CEM_HH, x + CEM_HW, y + CEM_HH
+          local G2 = 16
+          c = { kind = "cemetery", key = key, x = x, y = y, x0 = x0, y0 = y0, x1 = x1, y1 = y1, walls = {
+            { x0, y0, x - G2, y0 + 3 }, { x + G2, y0, x1, y0 + 3 },     -- north fence + gap
+            { x0, y1 - 3, x - G2, y1 }, { x + G2, y1 - 3, x1, y1 },     -- south fence + gap
+            { x0, y0, x0 + 3, y1 }, { x1 - 3, y0, x1, y1 },             -- west, east
+            { x - 10, y - 7, x + 10, y + 1, crypt = true },             -- the crypt
+          }, graves = {} }
+          for gy = -60, 64, 22 do
+            for gx = -100, 100, 18 do
+              if math.abs(gx) > 26 or math.abs(gy) > 26 then
+                if hash(gx + x, gy + y, 610) < 0.55 then c.graves[#c.graves + 1] = { x + gx, y + gy, hash(gx, gy, 611) < 0.5 } end
+              end
+            end
+          end
+        end
+      end
+    end
+    cemCache[key] = c
+    return c
+  end
+
   function self.basesNear(x, y, range, out)
     local n = 0
     local bx, by = floor(x / MBW), floor(y / MBH)
     for yy = by - 1, by + 1 do
       for xx = bx - 1, bx + 1 do
         local b = baseAt(xx, yy)
+        if b and x > b.x0 - range and x < b.x1 + range and y > b.y0 - range and y < b.y1 + range then
+          n = n + 1; out[n] = b
+        end
+      end
+    end
+    bx, by = floor(x / CMW), floor(y / CMH)
+    for yy = by - 1, by + 1 do
+      for xx = bx - 1, bx + 1 do
+        local b = cemAt(xx, yy)
         if b and x > b.x0 - range and x < b.x1 + range and y > b.y0 - range and y < b.y1 + range then
           n = n + 1; out[n] = b
         end
@@ -596,7 +674,7 @@ function W.new(spr, seed)
   -- base whose walls enclose (x, y)
   function self.inBase(x, y)
     local b = self.nearBase(x, y, 0)
-    if b and x > b.x0 + WALL and x < b.x1 - WALL and y > b.y0 + WALL and y < b.y1 - WALL then return b end
+    if b and b.kind == "base" and x > b.x0 + WALL and x < b.x1 - WALL and y > b.y0 + WALL and y < b.y1 - WALL then return b end
     return nil
   end
   local hitBases = {}
@@ -605,7 +683,7 @@ function W.new(spr, seed)
     if not list then list = hitBases; n = self.basesNear(x, y, 2, hitBases) end
     for i = 1, n do
       local b = list[i]
-      if x >= b.x0 and x < b.x1 and y >= b.y0 and y < b.y1 then
+      if b.kind == "base" and x >= b.x0 and x < b.x1 and y >= b.y0 and y < b.y1 then
       for _, w in ipairs(b.walls) do
         if x >= w[1] and x < w[3] and y >= w[2] and y < w[4] then return true end
       end

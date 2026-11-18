@@ -719,4 +719,49 @@ S.hud_w9 = {
   "................",
 }
 
+-- cemetery
+S.crypt = {
+  "........KKKKKK........",
+  "......KKAAAAAAKK......",
+  "....KKAAWWWWWWAAKK....",
+  "..KKAAAAAAAAAAAAAAKK..",
+  "KKKKKKKKKKKKKKKKKKKKKK",
+  ".KAAKAAAAKKKKAAAAKAAK.",
+  ".KAAKAAAKDDDDKAAAKAAK.",
+  ".KWAKAAKDDDDDDKAAKAWK.",
+  ".KAAKAAKDDDDDDKAAKAAK.",
+  ".KAAKAAKDDRRDDKAAKAAK.",
+  ".KAAKAAKDDDDDDKAAKAAK.",
+  ".KWAKAAKDDDDDDKAAKAWK.",
+  ".KAAKAAKDDDDDDKAAKAAK.",
+  "KKKKKKKKKKKKKKKKKKKKKK",
+  "KAAAAAAAAAAAAAAAAAAAAK",
+  "KKKKKKKKKKKKKKKKKKKKKK",
+}
+S.grave = {
+  ".KKK.",
+  "KAAAK",
+  "KAWAK",
+  "KAAAK",
+  "KAAAK",
+  "KKKKK",
+}
+S.grave2 = {
+  "..K..",
+  ".KAK.",
+  "KAAAK",
+  ".KAK.",
+  ".KAK.",
+  "KKKKK",
+}
+S.crypt_chest = {
+  "KKKKKKKK",
+  "KDADDADK",
+  "KAAAAAAK",
+  "KKKRRKKK",
+  "KDADDADK",
+  "KDDDDDDK",
+  "KKKKKKKK",
+}
+
 return S

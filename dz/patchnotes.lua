@@ -2,9 +2,20 @@
 
 local N = {}
 
-N.VERSION = "v3.00"
+N.VERSION = "v3.10"
 
 N.LIST = {
+  { "v3.10", "Cursed cemeteries", {
+    "Tiny, very rare fenced graveyards far from the start",
+    "Guarded by the risen dead - 5x HP, 2.5x damage, they stay inside:",
+    "  Grave Archers (red-eyed, dark bows)",
+    "  Pikemen - pull back, then a long thrust: step aside",
+    "  Shield Swordsmen - shield soaks all damage until it breaks,",
+    "    lightning and explosions break shields twice as fast",
+    "Clear every guard: +500 souls and the crypt opens",
+    "Crypt chest: 4-5 epic-or-better picks with a big luck boost",
+    "HUD shows when you're in a cemetery or a military base",
+  } },
   { "v3.00", "Hostile military bases", {
     "Rare walled compounds out in the world (never near the start)",
     "Red-uniform army inside: 8 soldiers + 2 MG nests, very tough",

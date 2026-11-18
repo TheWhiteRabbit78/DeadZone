@@ -159,11 +159,15 @@ local MOBS = {
   bomb_imp = { spr = "bomb_imp", hp = 7,   speed = 0.9,  dmg = 3, xp = 2,  score = 25,   r = 5,  unlock = 210, bomb = true, intro = "BOMB IMPS - keep your distance!" },
   boss     = { spr = "boss",     hp = 500, speed = 0.5,  dmg = 3, xp = 60, score = 1000, r = 11, heavy = true, boss = true },
   nest     = { spr = "nest",     hp = 90,  speed = 0,    dmg = 0, xp = 25, score = 300,  r = 9,  heavy = true, static = true },
+  grave_archer = { spr = "grave_archer", hp = 22, speed = 0.5, dmg = 1, xp = 6, score = 150, r = 5, ranged = true },
+  grave_pike   = { spr = "grave_pike",   hp = 34, speed = 0.55, dmg = 1, xp = 8, score = 200, r = 5, pike = true },
+  grave_shield = { spr = "grave_shield", hp = 30, speed = 0.45, dmg = 2, xp = 8, score = 200, r = 6, shielded = 45 },
   merc     = { spr = "merc",     hp = 70,  speed = 0,    dmg = 0, xp = 8,  score = 200,  r = 5,  heavy = true, static = true, merc = true },
   merc_mg  = { spr = "merc_mg",  hp = 280, speed = 0,    dmg = 0, xp = 25, score = 600,  r = 9,  heavy = true, static = true, merc = true, mg = true },
 }
 local SPAWN_ORDER = { "zombie", "ghoul", "brute", "skeleton", "bomb_imp" }
-local DEATH_COL = { zombie = S.Z, ghoul = S.A, brute = S.Z, skeleton = S.W, bomb_imp = S.R, boss = S.W }
+local DEATH_COL = { zombie = S.Z, ghoul = S.A, brute = S.Z, skeleton = S.W, bomb_imp = S.R, boss = S.W,
+  grave_archer = S.W, grave_pike = S.W, grave_shield = S.W }
 
 -- biome mob variants: base mob, recolour, extras (onHit = player debuff)
 local MOB_VARIANTS = {
@@ -526,6 +530,18 @@ function C.damageMob(m, dmg, kx, ky, raw, src)
     R.dmgSrc[src] = (R.dmgSrc[src] or 0) + applied
     R.dmgTick = R.dmgTick + applied
     m.numAcc = (m.numAcc or 0) + dmg
+  end
+  if m.shield and m.shield > 0 then
+    -- shield soaks damage first; lightning and explosions crack it twice as fast
+    local f = FAMSRC[src or ""]
+    local mult = (f == "lightning" or f == "explosive") and 2 or 1
+    m.shield = m.shield - dmg * mult
+    m.flash = 2
+    if m.shield > 0 then return end
+    dmg = -m.shield / mult
+    m.shield = 0
+    burst(m.x, m.y - 8, 10, S.A, 1.6)
+    addPart(m.x, m.y - 18, 0, -0.5, 12, S.W)
   end
   m.hp = m.hp - dmg
   m.flash = 2
@@ -1179,6 +1195,8 @@ function C.updateMobs()
         C.updateMerc(m, s, dist)
       elseif d.static then
         C.updateNest(m, s, dist)
+      elseif dist > 460 and m.keep then
+        -- cemetery guards wait for you
       elseif dist > 460 then
         if d.boss then
           local x, y = C.spawnPos()
@@ -1241,6 +1259,38 @@ function C.updateMobs()
           end
         end
 
+        -- cemetery guards: idle until you come close, never leave the graveyard
+        if m.leash then
+          local lx, ly = m.leash[1] - m.x, m.leash[2] - m.y
+          local ld = sqrt(lx * lx + ly * ly)
+          local pd = sqrt((p.x - m.leash[1]) ^ 2 + (p.y - m.leash[2]) ^ 2)
+          if pd > 230 then
+            if ld > 6 then nx, ny = lx / ld, ly / ld else mv = 0 end
+          elseif ld > 150 then
+            nx, ny = lx / ld, ly / ld
+          end
+        end
+        -- pikeman: pulls back, then a long thrust
+        if d.pike and not m.dead then
+          if m.pikeW then
+            m.pikeW = m.pikeW - 1
+            mv = 0
+            if m.pikeW <= 0 then
+              m.pikeW = nil
+              m.atkAnim = 10
+              local ax, ay = p.x - m.x, p.y - m.y
+              local ad = sqrt(ax * ax + ay * ay)
+              if ad < 40 and (ax * m.pdx + ay * m.pdy) / max(0.01, ad) > 0.7 then
+                local before = p.hp
+                C.hurtPlayer(4 * mobDmg(s) * (m.bdmg or 1))
+                if p.hp < before then p.knx, p.kny = m.pdx * 3, m.pdy * 3 end
+              end
+            end
+          elseif (m.cd or 0) <= 0 and dist < 34 then
+            m.pikeW, m.pdx, m.pdy = 14, nx, ny
+            m.cd = random(30, 50)
+          end
+        end
         -- mummy: telegraphed bandage throw that pulls you in
         if d.pull and not m.dead then
           m.pullCd = (m.pullCd or random(40, 120)) - 1
@@ -1625,6 +1675,8 @@ function C.updatePickups()
         C.startPick("chest")
       elseif it.kind == "armory" then
         C.startPick("armory")
+      elseif it.kind == "crypt_chest" then
+        C.startPick("crypt")
       end
     elseif it.ttl <= 0 then
       removeAt(pickups, i)
@@ -1738,6 +1790,9 @@ function C.startPick(kind)
   R.offerKind = kind
   R.banishMode = false
   R.offers = I.roll(owned, stats.luck, C.offerCount(), kind == "chest" and "epic" or nil, R.banned, nil, BIOME_FAVOR[R.biome or "plains"])
+  if kind == "crypt" then
+    R.offers = I.roll(owned, stats.luck + 5, C.offerCount() + 1, "epic", R.banned, nil, BIOME_FAVOR[R.biome or "plains"])
+  end
   if kind == "armory" then
     local mil = I.rollMilitary(owned, 3)
     if #mil > 0 then R.offers = mil else R.offerKind = "chest" end
@@ -1914,7 +1969,29 @@ function C.updateBases(s)
     local b = tmpBases[i]
     local st = R.bases[b.key]
     if not st then st = { alive = 0 }; R.bases[b.key] = st end
-    if not st.spawned then
+    if not st.spawned and b.kind == "cemetery" then
+      local dx, dy = p.x - b.x, p.y - b.y
+      if dx * dx + dy * dy < 320 * 320 then
+        st.spawned, st.kind = true, "cemetery"
+        local L = World.CEM_LAYOUT
+        local function add(kind, ofs)
+          local m = C.spawnMob(kind, b.x + ofs[1], b.y + ofs[2])
+          -- the dead here are far tougher than anything outside
+          m.hp, m.maxHp = m.hp * 5, m.maxHp * 5
+          if m.def.shielded then m.shield = m.def.shielded * hpMul(s) * 5; m.shieldMax = m.shield end
+          m.bdmg = (m.bdmg or 1) * 2.5
+          m.keep, m.leash, m.baseKey, m.elite = true, { b.x, b.y }, b.key, nil
+          m.reward = (m.reward or 1) * 2
+          R.mercs[m] = true
+          st.alive = st.alive + 1
+        end
+        for _, o in ipairs(L.archers) do add("grave_archer", o) end
+        for _, o in ipairs(L.pikes) do add("grave_pike", o) end
+        for _, o in ipairs(L.shields) do add("grave_shield", o) end
+        say("CURSED CEMETERY!  Clear it for 500 souls - if you can", 140, S.R)
+      end
+    end
+    if not st.spawned and b.kind == "base" then
       local dx, dy = p.x - b.x, p.y - b.y
       if dx * dx + dy * dy < 430 * 430 then
         st.spawned = true
@@ -1943,6 +2020,13 @@ function C.mercDown(m)
     local b
     for i = 1, R.nearBases do if tmpBases[i].key == m.baseKey then b = tmpBases[i] end end
     b = b or { x = m.x, y = m.y }
+    if st.kind == "cemetery" then
+      pickups[#pickups + 1] = { x = b.x, y = b.y + 12, kind = "crypt_chest", ttl = 99999 }
+      R.bonusSouls = (R.bonusSouls or 0) + 500
+      say("CEMETERY CLEARED!  +500 souls  -  the crypt is open", 140, S.Y)
+      sfx("level")
+      return
+    end
     pickups[#pickups + 1] = { x = b.x, y = b.y + 6, kind = "armory", ttl = 99999 }
     R.bonusSouls = (R.bonusSouls or 0) + 40
     say("BASE CAPTURED!  Grab the armory chest  (+40 souls)", 120, S.Y)
@@ -2271,12 +2355,12 @@ end
 ---------------------------------------------------------------------- render: world
 -- current animation frame for a mob (falls back to the static sprite)
 local function mobFrame(m)
-  local A = ANIM[m.def.spr]
+  local A = ANIM[(m.def.shielded and (m.shield or 0) <= 0) and "grave_sword" or m.def.spr]
   if not A then return spr[m.def.spr] end
   local atk = A.attack
   if atk then
     if m.fuse then return atk[floor(frame / 3) % #atk + 1] end
-    if m.pullW or m.chargeW then return atk[1] end
+    if m.pullW or m.chargeW or m.pikeW then return atk[1] end
     if m.chargeT then return atk[min(#atk, 2)] end
     if m.def.ranged and m.cd < 12 and m.cd > 0 then return atk[(m.cd < 6) and 2 or 1] end
     if (m.atkAnim or 0) > 0 then
@@ -2370,9 +2454,14 @@ local function renderWorld()
   local nb = world.basesNear(camX + PW / 2, camY + PH / 2, PW, viewBaseList)
   for i = 1, nb do
     local b = viewBaseList[i]
-    for _, c in ipairs(World.BASE_LAYOUT.crates) do addDraw(spr.crate, b.x + c[1] - 4, b.y + c[2] - 7, false, nil, b.y + c[2]) end
-    local cap = R.bases[b.key] and R.bases[b.key].captured
-    addDraw(cap and spr.flag or spr.flag_red, b.x - 3, b.y - 24, false, nil, b.y - 12)
+    if b.kind == "cemetery" then
+      for _, g in ipairs(b.graves) do addDraw(g[3] and spr.grave or spr.grave2, g[1] - 2, g[2] - 6, false, nil, g[2]) end
+      addDraw(spr.crypt, b.x - 11, b.y - 15, false, nil, b.y + 1)
+    else
+      for _, c in ipairs(World.BASE_LAYOUT.crates) do addDraw(spr.crate, b.x + c[1] - 4, b.y + c[2] - 7, false, nil, b.y + c[2]) end
+      local cap = R.bases[b.key] and R.bases[b.key].captured
+      addDraw(cap and spr.flag or spr.flag_red, b.x - 3, b.y - 24, false, nil, b.y - 12)
+    end
   end
   if R.activeOutposts then
     for _, o in ipairs(R.activeOutposts) do
@@ -2609,9 +2698,19 @@ local function renderWorld()
   end
   for _, q in ipairs(parts) do scr.pixel(q.x - camX, q.y - camY, q.col) end
 
+  -- shield bars on grave swordsmen
+  for _, m in ipairs(mobs) do
+    if m.shield and m.shield > 0 and not m.dead then
+      local bx, by = floor(m.x - 6 - camX), floor(m.y - 21 - camY)
+      if bx > -12 and bx < PW and by > 0 and by < PH then
+        scr.rect(bx, by, 12, 1, S.K)
+        scr.rect(bx, by, max(1, floor(m.shield / (m.shieldMax or m.shield) * 12)), 1, S.A)
+      end
+    end
+  end
   -- HP bars on elites and nests
   for _, m in ipairs(mobs) do
-    if (m.elite or m.def.static) and not m.dead and m.hp < m.maxHp then
+    if (m.elite or m.def.static or m.keep) and not m.dead and m.hp < m.maxHp then
       local sp = mobFrame(m)
       local bx, by = floor(m.x - 6 - camX), floor(m.y - sp.h - 2 - camY)
       if bx > -12 and bx < PW and by > 0 and by < PH then
@@ -2672,7 +2771,15 @@ local function renderHUD()
   local bname = World.BIOMES[bio].name
   T(9, 3, bname, B.col, S.K)
   local sd = C.soulDecay(bio)
-  T(10 + #bname, 3, ("danger %d  souls x%.2f"):format(B.danger, sd), (B.danger >= 3) and S.R or ((sd < 0.6) and S.O or S.A), S.K)
+  local site = world.nearBase(p.x, p.y, 0)
+  if site and site.kind == "cemetery" then
+    T(9, 3, " CURSED CEMETERY  danger 5  -  clear it: +500 souls          ", S.R, S.K)
+  elseif site then
+    local cap = R.bases[site.key] and R.bases[site.key].captured
+    T(9, 3, cap and " CAPTURED BASE  guns +50%                  " or " HOSTILE BASE  danger 5  -  capture it                  ", cap and S.Y or S.R, S.K)
+  else
+    T(10 + #bname, 3, ("danger %d  souls x%.2f"):format(B.danger, sd), (B.danger >= 3) and S.R or ((sd < 0.6) and S.O or S.A), S.K)
+  end
   hudBar(7, 2, 40, p.xp / p.xpNext, S.C, S.W, S.D, 2)
   T(48, 2, ("%d / %d xp"):format(floor(p.xp), p.xpNext), S.A, S.K)
   -- timer (big pixel digits) + kills
@@ -2919,6 +3026,7 @@ local function renderPick()
   if R.banishMode then word, sub, col, colTop = "BANISH", "which item? gone for this run", S.R, S.O
   elseif R.offerKind == "chest" then word, sub, col, colTop = "TREASURE!", "pick a reward", S.Y, S.W
   elseif R.offerKind == "armory" then word, sub, col, colTop = "ARMORY", "captured base - pick one, no drawbacks", S.R, S.O
+  elseif R.offerKind == "crypt" then word, sub, col, colTop = "CRYPT", "the dead give up their treasure", S.A, S.W
   elseif R.offerKind == "bonus" then word, sub, col, colTop = "HEAD START", "free pick", S.C, S.W
   else word, sub, col, colTop = "LEVEL UP!", "level " .. (p.level - p.pending + 1), S.Y, S.W end
   local fav = FAVOR_NAME[R.biome or "plains"]
