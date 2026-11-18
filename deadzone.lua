@@ -312,6 +312,8 @@ local p, R, stats, owned
 local mobs, bullets, eshots, gems, pickups, parts, beams, strikes, fires, orbs
 local UI = { notesScroll = 0, showNums = true, msg = "", msgCol = S.Y, msgTimer = 0, shake = 0, treeSel = "root", tcx = 0, tcy = 0, menuCam = 0, tbg = 15, prestigeArm = 0, nameBuf = "", board = {} }
 local grid = {}
+-- render + menu functions live in V (keeps the main chunk under the 200-local limit)
+local V = {}
 
 local function secs() return R.tick / TPS end
 -- difficulty: gentle start, then compounding after minute 4
@@ -2476,7 +2478,7 @@ local function box(x, y, w, h, bg)
   local blank = (" "):rep(w)
   for yy = y, y + h - 1 do scr.text(x, yy, blank, S.W, bg) end
 end
-local function frameBox(x, y, w, h, border)
+function V.frameBox(x, y, w, h, border)
   box(x - 1, y - 1, w + 2, h + 2, border)
   box(x, y, w, h, S.K)
 end
@@ -2487,7 +2489,7 @@ end
 
 ---------------------------------------------------------------------- render: world
 -- current animation frame for a mob (falls back to the static sprite)
-local function mobFrame(m)
+function V.mobFrame(m)
   local A = ANIM[(m.def.shielded and (m.shield or 0) <= 0) and "grave_sword" or m.def.spr]
   if not A then return spr[m.def.spr] end
   local atk = A.attack
@@ -2506,7 +2508,7 @@ local function mobFrame(m)
   return w[floor((m.walkP or 0) / 3 + (m.phase or 0)) % #w + 1]
 end
 
-local function renderWorld()
+function V.renderWorld()
   local sh = UI.shake
   local sx = sh > 0 and random(-sh, sh) or 0
   local sy = sh > 0 and random(-sh, sh) or 0
@@ -2650,7 +2652,7 @@ local function renderWorld()
     end
   end
   for _, m in ipairs(mobs) do
-    local sp = mobFrame(m)
+    local sp = V.mobFrame(m)
     local x, y = m.x - sp.w / 2, m.y - sp.h + 1
     if x + sp.w > camX and x < camX + PW and y + sp.h > camY and y < camY + PH then
       local bob = (not ANIM[m.def.spr] and m.moving and (frame + m.phase) % 12 < 6) and -1 or 0
@@ -2905,7 +2907,7 @@ local function renderWorld()
   -- affix marks: a small coloured diamond over the elite
   for _, m in ipairs(mobs) do
     if m.affix and not m.dead then
-      local sp = mobFrame(m)
+      local sp = V.mobFrame(m)
       local bx, by = floor(m.x - camX), floor(m.y - sp.h - 5 - camY)
       if bx > 0 and bx < PW and by > 12 and by < PH then
         local c = S[AFFIX[m.affix].col]
@@ -2917,7 +2919,7 @@ local function renderWorld()
   -- HP bars on elites and nests
   for _, m in ipairs(mobs) do
     if (m.elite or m.def.static or m.keep) and not m.dead and m.hp < m.maxHp then
-      local sp = mobFrame(m)
+      local sp = V.mobFrame(m)
       local bx, by = floor(m.x - 6 - camX), floor(m.y - sp.h - 2 - camY)
       if bx > -12 and bx < PW and by > 0 and by < PH then
         scr.rect(bx, by, 12, 1, S.K)
@@ -2945,7 +2947,7 @@ end
 
 ---------------------------------------------------------------------- render: HUD
 -- pixel bar in text cells (x, y 1-based cells; w cells wide; 1 row)
-local function hudBar(cx, cy, w, frac, col, hi, back, rows)
+function V.hudBar(cx, cy, w, frac, col, hi, back, rows)
   local x0, y0 = (cx - 1) * 2, (cy - 1) * 3
   local pw = w * 2
   local fill = floor(max(0, min(1, frac)) * pw + 0.5)
@@ -2958,7 +2960,7 @@ local function hudBar(cx, cy, w, frac, col, hi, back, rows)
   end
 end
 
-local function renderHUD()
+function V.renderHUD()
   -- your name over your head (text cells, so it stays sharp)
   if UI.pcx and (state == "play" or (state == "evac" and R.evacT < 8)) then
     local nm = prof.name
@@ -2972,7 +2974,7 @@ local function renderHUD()
   scr.sprite(spr.hud_heart, 4, 0)
   local low = p.hp < p.maxHp * 0.3
   local hcol = (low and frame % 10 < 5) and S.O or S.R
-  hudBar(7, 1, 40, p.hp / p.maxHp, hcol, S.O, S.D)
+  V.hudBar(7, 1, 40, p.hp / p.maxHp, hcol, S.O, S.D)
   T(48, 1, ("%d / %d"):format(ceil(p.hp * 10 - 0.01), floor(p.maxHp * 10 + 0.5)), low and S.O or S.W, S.K)
   -- level + XP
   T(2, 3, "LV", S.A, S.K)
@@ -2992,7 +2994,7 @@ local function renderHUD()
   else
     T(10 + #bname, 3, ("danger %d  souls x%.2f"):format(B.danger, sd), (B.danger >= 3) and S.R or ((sd < 0.6) and S.O or S.A), S.K)
   end
-  hudBar(7, 2, 40, p.xp / p.xpNext, S.C, S.W, S.D, 2)
+  V.hudBar(7, 2, 40, p.xp / p.xpNext, S.C, S.W, S.D, 2)
   T(48, 2, ("%d / %d xp"):format(floor(p.xp), p.xpNext), S.A, S.K)
   -- timer (big pixel digits) + kills
   local tt = fmtTime(secs())
@@ -3021,7 +3023,7 @@ local function renderHUD()
     scr.rect((bx - 15) * 2, 12, (bw + 16) * 2, 3, S.K)
     scr.sprite(spr.hud_skull, (bx - 14) * 2, 12)
     T(bx - 10, 5, "GRAVE KING", S.R, S.K)
-    hudBar(bx, 5, bw, max(0, R.boss.hp) / R.boss.maxHp, S.R, S.O, S.D, 2)
+    V.hudBar(bx, 5, bw, max(0, R.boss.hp) / R.boss.maxHp, S.R, S.O, S.D, 2)
     row = 7
   end
   -- extraction status
@@ -3033,7 +3035,7 @@ local function renderHUD()
       local bw = 40
       local bx = floor((CW - bw) / 2) + 1
       T(bx - 14, row, " HOLD THE LZ ", S.K, S.g)
-      hudBar(bx, row, bw, (state == "evac") and 1 or lz.hold / EXTRACT_HOLD, S.g, S.W, S.D, 2)
+      V.hudBar(bx, row, bw, (state == "evac") and 1 or lz.hold / EXTRACT_HOLD, S.g, S.W, S.D, 2)
       T(bx + bw + 1, row, (" %ds "):format(max(0, ceil((EXTRACT_HOLD - lz.hold) / TPS))), S.W, S.K)
       row = row + 2
     else
@@ -3101,7 +3103,7 @@ local function renderHUD()
 end
 
 ---------------------------------------------------------------------- render: overlays
-local function statLines()
+function V.statLines()
   local st = stats
   local L = {
     ("All damage   x%.2f"):format(st.dmg),
@@ -3129,7 +3131,7 @@ local function statLines()
   return L
 end
 
-local function sourceLines(n)
+function V.sourceLines(n)
   local list, total = {}, 0
   for src, v in pairs(R.dmgSrc) do list[#list + 1] = { src, v }; total = total + v end
   table.sort(list, function(a, b) return a[2] > b[2] end)
@@ -3142,7 +3144,7 @@ local function sourceLines(n)
   return L, total
 end
 
-local function ownedList()
+function V.ownedList()
   local L = {}
   for _, rk in ipairs({ "legendary", "epic", "rare", "common" }) do
     for _, it in ipairs(I.LIST) do
@@ -3156,7 +3158,7 @@ end
 
 local RARFRAME = { common = S.A, rare = S.C, epic = S.O, legendary = S.Y, military = S.R }
 local ITEMART, itemSpr = require("dz.itemicons"), {}
-local function itemSprite(id)
+function V.itemSprite(id)
   if itemSpr[id] == nil then
     local ALIAS = { m_belt = "hell", m_rounds = "ap", m_drum = "barrel", m_armor = "bulwark", m_target = "marks",
       m_medic = "bandage", m_uplink = "midas" }
@@ -3175,7 +3177,7 @@ local function itemSprite(id)
 end
 
 -- one level-up card: text cells x0..x0+w-1, y0..y0+h-1
-local function drawPickCard(it, i, x0, y0, w, h)
+function V.drawPickCard(it, i, x0, y0, w, h)
   local rar = I.RARITY[it.rarity]
   local rc = P.slot[rar.col]
   local fc = R.banishMode and ((frame % 10 < 5) and S.R or S.D) or RARFRAME[it.rarity]
@@ -3215,7 +3217,7 @@ local function drawPickCard(it, i, x0, y0, w, h)
     T(x0 + floor((w - #ft - 2) / 2), y0 + 2, " " .. ft .. " ", (it.family == "arcane") and S.W or S.K, FC[it.family])
   end
   -- big icon (24x24 art, falls back to a scaled mini icon)
-  local spr = itemSprite(it.id)
+  local spr = V.itemSprite(it.id)
   if spr then scr.sprite(spr, px0 + w - 24, (iconY - 1) * 3, false, R.banishMode and S.R or nil)
   else Scn.icon(Sc.itemIcon(it), px0 + w - 16, (iconY - 1) * 3 + 6, R.banishMode and S.R or rc, 4) end
   T(x0 + 1, y0 + 19, blank, S.W, S.K)
@@ -3261,7 +3263,7 @@ local function drawPickCard(it, i, x0, y0, w, h)
   end
 end
 
-local function renderPick()
+function V.renderPick()
   local n = #R.offers
   R.pickT = (R.pickT or 0) + 1
   local cardW = min(40, floor((CW - 8 - (n - 1) * 3) / n))
@@ -3299,7 +3301,7 @@ local function renderPick()
     local off = 0
     if t < 10 then off = floor(((10 - max(0, t)) / 10) ^ 2 * (CH - cy + 2)) end
     local x0 = floor((CW - total) / 2) + 1 + (i - 1) * (cardW + 3)
-    if cy + off <= CH then drawPickCard(it, i, x0, cy + off, cardW, cardH) end
+    if cy + off <= CH then V.drawPickCard(it, i, x0, cy + off, cardW, cardH) end
   end
   local keysTxt = (n == 4) and "1 2 3 4  pick" or "1 2 3  pick"
   if R.rerolls > 0 and R.offerKind ~= "armory" then keysTxt = keysTxt .. "      R reroll (" .. R.rerolls .. ")" end
@@ -3307,21 +3309,21 @@ local function renderPick()
   center(cy + cardH + 1, " " .. keysTxt .. " ", S.W, S.K)
 end
 
-local function renderPause()
+function V.renderPause()
   local w, h = min(CW - 4, 130), 28
   local x0, y0 = floor((CW - w) / 2) + 1, floor((CH - h) / 2) + 1
-  frameBox(x0, y0, w, h, S.D)
+  V.frameBox(x0, y0, w, h, S.D)
   center(y0 + 1, "PAUSED", S.Y)
   T(x0 + 3, y0 + 3, "YOUR STATS", S.A)
-  for i, l in ipairs(statLines()) do T(x0 + 3, y0 + 4 + i, l, S.W) end
+  for i, l in ipairs(V.statLines()) do T(x0 + 3, y0 + 4 + i, l, S.W) end
   T(x0 + 46, y0 + 3, ("YOUR ITEMS  spells %d/%d  passives %d/%d"):format(I.slotCount(owned, "spell"), I.SLOTS.spell, I.slotCount(owned, "passive"), I.SLOTS.passive), S.A)
-  local items = ownedList()
+  local items = V.ownedList()
   if #items == 0 then T(x0 + 46, y0 + 5, "nothing yet", S.D) end
   for i, e in ipairs(items) do
     if i <= 20 then T(x0 + 46, y0 + 4 + i, e[1], e[2]) end
   end
   if w >= 120 then
-    local lines, total = sourceLines(18)
+    local lines, total = V.sourceLines(18)
     T(x0 + 78, y0 + 3, "DAMAGE BY SOURCE", S.A)
     T(x0 + 78, y0 + 4, ("total %s   now %s/s"):format(fmtNum(total), fmtNum(R.dps)), S.Y)
     for i, l in ipairs(lines) do T(x0 + 78, y0 + 5 + i, l, S.W) end
@@ -3329,7 +3331,7 @@ local function renderPause()
   center(y0 + 26, "P / SPACE resume      Q end run", S.W)
 end
 
-local function renderDead()
+function V.renderDead()
   local w, h = 72, 30
   local x0, y0 = floor((CW - w) / 2) + 1, floor((CH - h) / 2) + 1
   if R.extracted then
@@ -3351,17 +3353,17 @@ local function renderDead()
   end
   center(y0 + 11, ("+%d souls   (total %d)"):format(R.soulsEarned, prof.souls), S.C)
   center(y0 + 12, ("Survivors rescued %d    Nests destroyed %d"):format(R.rescued, R.nestsCleared), S.A)
-  local items = ownedList()
+  local items = V.ownedList()
   local names = {}
   for i, e in ipairs(items) do if i <= 6 then names[#names + 1] = e[1] end end
   if #names > 0 then center(y0 + 14, table.concat(names, ", "):sub(1, w - 4), S.A) end
-  local lines, total = sourceLines(7)
+  local lines, total = V.sourceLines(7)
   center(y0 + 16, "DAMAGE BY SOURCE   (total " .. fmtNum(total) .. ")", S.A)
   for i, l in ipairs(lines) do center(y0 + 17 + i, l, S.W) end
   if R.deadTimer > 30 then center(y0 + 27, "SPACE new run     T skill tree     Q title", S.g) end
 end
 
-local function renderTitle()
+function V.renderTitle()
   -- logo over the sky, then the centre panel: controls + menu
   local w, h = 62, 21
   local top = floor((CH - (h + 13)) / 2) + 1
@@ -3427,7 +3429,7 @@ local function renderTitle()
   if UI.msgTimer > 0 then center(y0 + h + 2, " " .. UI.msg .. " ", UI.msgCol, S.K) end
 end
 
-local function renderNotes()
+function V.renderNotes()
   local w, h = min(CW - 6, 100), CH - 8
   local x0, y0 = floor((CW - w) / 2) + 1, floor((CH - h) / 2) + 1
   Scn.panel(x0, y0, w, h, S.C, true)
@@ -3447,7 +3449,7 @@ local function renderNotes()
   center(y0 + h - 2, "W/S or arrows scroll        V or Q back", S.A)
 end
 
-local function renderNaming()
+function V.renderNaming()
   local w, h = 50, 9
   local x0, y0 = floor((CW - w) / 2) + 1, floor((CH - h) / 2) + 1
   Scn.panel(x0, y0, w, h, S.Y, true)
@@ -3461,13 +3463,13 @@ end
 local TREE_SX, TREE_SY, CARD_W, CARD_H = 26, 8, 22, 5
 local BCOL = { root = S.g, fire = S.O, arcana = S.C, fort = S.R, fortune = S.Y }
 
-local function treeTarget()
+function V.treeTarget()
   local n = Tree.byId[UI.treeSel]
   return n.x * TREE_SX * 2, n.y * TREE_SY * 3
 end
 
 -- one skill card, top-left text cell (cx0, cy0)
-local function drawCard(n, cx0, cy0, sel)
+function V.drawCard(n, cx0, cy0, sel)
   local lv = prof.tree
   local l = lv[n.id] or 0
   local unlocked = Tree.unlocked(n, lv)
@@ -3518,9 +3520,9 @@ local function drawCard(n, cx0, cy0, sel)
   else line(cy0 + 3, cost .. " souls", afford and S.g or S.R) end
 end
 
-local function renderTree()
+function V.renderTree()
   -- camera glides to the selected card
-  local tx, ty = treeTarget()
+  local tx, ty = V.treeTarget()
   UI.tcx = UI.tcx + (tx - UI.tcx) * 0.3
   UI.tcy = UI.tcy + (ty - UI.tcy) * 0.3
   if abs(tx - UI.tcx) < 0.6 then UI.tcx = tx end
@@ -3569,10 +3571,10 @@ local function renderTree()
     local cx, cy = cellOf(n)
     local x0, y0 = cx - floor(CARD_W / 2), cy - 2
     if x0 + CARD_W >= 1 and x0 <= CW and y0 >= 2 and y0 + CARD_H - 1 <= bottomRow then
-      if n.id == UI.treeSel then selCard = { n, x0, y0 } else drawCard(n, x0, y0, false) end
+      if n.id == UI.treeSel then selCard = { n, x0, y0 } else V.drawCard(n, x0, y0, false) end
     end
   end
-  if selCard then drawCard(selCard[1], selCard[2], selCard[3], true) end
+  if selCard then V.drawCard(selCard[1], selCard[2], selCard[3], true) end
 
   -- header
   T(1, 1, (" "):rep(CW), S.W, S.K)
@@ -3619,23 +3621,23 @@ local function render()
     if P.current ~= "night" then P.use("night"); P.apply(out) end
     UI.tbg = FACE
     if state == "tree" then
-      renderTree()
+      V.renderTree()
     else
       UI.menuCam = UI.menuCam + 0.6
       Scn.background(UI.menuCam, -50, frame)
       Scn.embers(UI.menuCam, -50, frame)
-      if state == "title" then renderTitle()
-      elseif state == "naming" then renderTitle(); renderNaming()
-      elseif state == "notes" then renderNotes()
-      elseif state == "dead" then renderDead() end
+      if state == "title" then V.renderTitle()
+      elseif state == "naming" then V.renderTitle(); V.renderNaming()
+      elseif state == "notes" then V.renderNotes()
+      elseif state == "dead" then V.renderDead() end
     end
   else
     if P.current ~= "day" then P.use("day"); P.apply(out) end
     UI.tbg = S.K
-    renderWorld()
-    renderHUD()
-    if state == "pick" then renderPick()
-    elseif state == "paused" then renderPause() end
+    V.renderWorld()
+    V.renderHUD()
+    if state == "pick" then V.renderPick()
+    elseif state == "paused" then V.renderPause() end
   end
   scr.present()
 end
@@ -3643,12 +3645,12 @@ end
 ---------------------------------------------------------------------- input
 local NUM = { [keys.one] = 1, [keys.two] = 2, [keys.three] = 3, [keys.four] = 4 }
 
-local function startRun()
+function V.startRun()
   newRun()
   state = "play"
 end
 
-local function toTitle()
+function V.toTitle()
   newRun()
   state = "title"
   UI.board = Prof.leaderboard(10)
@@ -3656,7 +3658,7 @@ end
 
 local function onKey(k)
   if state == "title" then
-    if k == keys.space or k == keys.enter then startRun()
+    if k == keys.space or k == keys.enter then V.startRun()
     elseif k == keys.t then state = "tree"
     elseif k == keys.n then state = "naming"; UI.nameBuf = ""
     elseif k == keys.v then state = "notes"; UI.notesScroll = 0
@@ -3696,9 +3698,9 @@ local function onKey(k)
     elseif k == keys.q then C.gameOver() end
   elseif state == "dead" then
     if R.deadTimer > 30 then
-      if k == keys.space or k == keys.enter then startRun()
+      if k == keys.space or k == keys.enter then V.startRun()
       elseif k == keys.t then state = "tree"
-      elseif k == keys.q then toTitle() end
+      elseif k == keys.q then V.toTitle() end
     end
   elseif state == "tree" then
     if k == keys.w or k == keys.up then TR.move(0, -1)
@@ -3707,12 +3709,12 @@ local function onKey(k)
     elseif k == keys.d or k == keys.right then TR.move(1, 0)
     elseif k == keys.space or k == keys.enter then TR.buy()
     elseif k == keys.x then TR.prestige()
-    elseif k == keys.q or k == keys.t then toTitle() end
+    elseif k == keys.q or k == keys.t then V.toTitle() end
   end
 end
 
 ---------------------------------------------------------------------- controller screen (computer)
-local function drawController()
+function V.drawController()
   if out == native then return end
   native.setBackgroundColour(colours.black)
   native.clear()
@@ -3752,7 +3754,7 @@ local function main()
   UI.board = Prof.leaderboard(10)
   newRun()
   state = "title"
-  drawController()
+  V.drawController()
   local timer = os.startTimer(0.05)
   while running do
     local ev = { os.pullEventRaw() }
@@ -3792,7 +3794,7 @@ local function main()
       if state == "title" or state == "dead" or state == "tree" then login(ev[2]) end
     elseif e == "peripheral" or e == "peripheral_detach" then
       findDetector()
-      drawController()
+      V.drawController()
     elseif e == "terminate" then
       running = false
     end

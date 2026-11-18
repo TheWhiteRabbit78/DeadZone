@@ -2,9 +2,13 @@
 
 local N = {}
 
-N.VERSION = "v3.20"
+N.VERSION = "v3.21"
 
 N.LIST = {
+  { "v3.21", "Hotfix", {
+    "Fixed v3.20 not starting on the server",
+    "  (\"more than 200 local variables\" error)",
+  } },
   { "v3.20", "Runs have an ending", {
     "Build slots: 4 weapons, 6 spells, 6 passives",
     "  once a group is full you only get upgrades - commit to a build",
