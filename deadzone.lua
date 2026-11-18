@@ -159,10 +159,15 @@ local DEATH_COL = { zombie = S.Z, ghoul = S.A, brute = S.Z, skeleton = S.W, bomb
 local MOB_VARIANTS = {
   frost_zombie = { "zombie", { Z = "C", N = "U" }, { onHit = "chill" } },
   frost_ghoul  = { "ghoul", { A = "C", N = "U" }, { onHit = "chill" } },
-  yeti         = { "brute", { Z = "W", N = "A", A = "C" }, { onHit = "chill" } },
+  yeti         = { "brute", false, { onHit = "chill", hp = 46, col = "W" } },
+  wendigo      = { "ghoul", false, { onHit = "chill", speed = 1.45, col = "N" } },
+  mammoth      = { "brute", false, { onHit = "chill", hp = 80, r = 9, charge = true, col = "N" } },
+  scorpion     = { "ghoul", false, { onHit = "poison", speed = 1.2, hp = 5, col = "N" } },
+  bloater      = { "brute", false, { onHit = "poison", hp = 32, speed = 0.32, cloud = true, col = "g" } },
+  wolf         = { "ghoul", false, { speed = 1.5, hp = 5, col = "A" } },
   ice_archer   = { "skeleton", { W = "C", B = "U" }, { onHit = "chill" } },
   frost_imp    = { "bomb_imp", { R = "U", D = "C", A = "W" }, { onHit = "chill" } },
-  mummy        = { "zombie", { Z = "W", N = "A", D = "S", R = "Y" }, {} },
+  mummy        = { "zombie", false, { pull = true, hp = 8, col = "W" } },
   sand_ghoul   = { "ghoul", { A = "S" }, {} },
   sand_brute   = { "brute", { Z = "S", A = "Y" }, {} },
   sand_archer  = { "skeleton", { W = "S" }, {} },
@@ -185,8 +190,14 @@ for name, v in pairs(MOB_VARIANTS) do
   for k, val in pairs(v[3]) do d[k] = val end
   d.spr, d.base, d.intro = name, v[1], nil
   MOBS[name] = d
-  DEATH_COL[name] = P.slot[v[2][({ zombie = "Z", ghoul = "A", brute = "Z", skeleton = "W", bomb_imp = "R" })[v[1]]] or "R"]
-  ANIM[name] = ANIM.build(ANIM.src[v[1]], v[2])
+  if v[2] then
+    DEATH_COL[name] = P.slot[v[2][({ zombie = "Z", ghoul = "A", brute = "Z", skeleton = "W", bomb_imp = "R" })[v[1]]] or "R"]
+    ANIM[name] = ANIM.build(ANIM.src[v[1]], v[2])
+  else
+    -- hand-drawn biome mob
+    DEATH_COL[name] = P.slot[v[3].col or "R"]
+    ANIM[name] = ANIM.build(ANIM.src[name])
+  end
 end
 
 -- biome gameplay: danger scales mob HP/damage and rewards; mod = element multipliers
@@ -216,14 +227,15 @@ local FAVOR_NAME = { forest = "SAWS + THORNS", swamp = "LIGHTNING + POISON", jun
 -- souls shrink the longer you stay in an easy biome (floor reached after 10 min there)
 local SOUL_FLOOR = { 0.25, 0.5, 0.75, 1 }
 
-local COLD_SET = { zombie = "frost_zombie", ghoul = "frost_ghoul", brute = "yeti", skeleton = "ice_archer", bomb_imp = "frost_imp" }
+local COLD_SET = { zombie = "frost_zombie", ghoul = "wendigo", brute = "yeti", skeleton = "ice_archer", bomb_imp = "frost_imp" }
+local BOG_SET = { zombie = "frost_zombie", ghoul = "wendigo", brute = "mammoth", skeleton = "ice_archer", bomb_imp = "frost_imp" }
 local ROSTER = {
   forest = { zombie = "woods_zombie", ghoul = "wolf" },
-  swamp = { zombie = "bog_zombie", ghoul = "bog_ghoul", brute = "bloat_brute", skeleton = "bog_archer" },
-  jungle = { zombie = "vine_zombie", ghoul = "panther", brute = "bloat_brute", skeleton = "bog_archer" },
-  desert = { zombie = "mummy", ghoul = "sand_ghoul", brute = "sand_brute", skeleton = "sand_archer" },
+  swamp = { zombie = "bog_zombie", ghoul = "bog_ghoul", brute = "bloater", skeleton = "bog_archer" },
+  jungle = { zombie = "vine_zombie", ghoul = "panther", brute = "bloater", skeleton = "bog_archer" },
+  desert = { zombie = "mummy", ghoul = "scorpion", brute = "sand_brute", skeleton = "sand_archer" },
   badlands = { zombie = "scorched", ghoul = "ember_ghoul", brute = "magma_brute", skeleton = "fire_archer" },
-  tundra = COLD_SET, snowforest = COLD_SET, frozenbog = COLD_SET,
+  tundra = COLD_SET, snowforest = COLD_SET, frozenbog = BOG_SET,
 }
 -- which damage sources count as which element (for biome modifiers)
 local ELEM = {
@@ -353,7 +365,7 @@ local function newRun()
     outposts = {}, activeOutposts = {}, followers = {}, survivor = nil, nextSurvivor = 180 * TPS,
     rescued = 0, nestsCleared = 0,
     dmgSrc = {}, dmgTick = 0, dmgHist = {}, dmgSum = 0, dps = 0, nums = {},
-    corpses = {}, booms = {}, dyingT = 0,
+    corpses = {}, booms = {}, dyingT = 0, clouds = {},
   }
   owned = {}
   mobs, bullets, eshots, gems, pickups, parts, beams, strikes, fires, orbs = {}, {}, {}, {}, {}, {}, {}, {}, {}, {}
@@ -642,7 +654,7 @@ end
 function C.killMob(m)
   if m.dead then return end
   m.dead = true
-  if m.numAcc and m.numAcc > 0 and UI.showNums and #R.nums < 60 then
+  if m.numAcc and m.numAcc >= 0.5 and UI.showNums and #R.nums < 60 then
     R.nums[#R.nums + 1] = { x = m.x, y = m.y - (m.def.r * 2 + 10), v = m.numAcc, crit = m.numCrit, life = 16 }
     m.numAcc = 0
   end
@@ -653,6 +665,9 @@ function C.killMob(m)
   C.dropGem(m.x, m.y - 4, m.def.xp * (1 + secs() / 400) * (m.elite and 4 or 1) * rw)
   burst(m.x, m.y - 6, 8, DEATH_COL[m.kind] or S.R, 1.4)
   burst(m.x, m.y - 6, 4, S.R, 0.8)
+  if m.def.cloud and #R.clouds < 12 then
+    R.clouds[#R.clouds + 1] = { x = m.x, y = m.y - 5, r = 26, t = 110 }
+  end
   local an = ANIM[m.def.spr]
   if an and an.death then
     local cs = R.corpses
@@ -1089,6 +1104,12 @@ function C.updatePlayer()
   p.vy = p.vy + (ty - p.vy) * 0.5
   if abs(tx - p.vx) < 0.06 then p.vx = tx end
   if abs(ty - p.vy) < 0.06 then p.vy = ty end
+  if (p.pullT or 0) > 0 then
+    p.pullT = p.pullT - 1
+    local dx, dy = p.pullX - p.x, p.pullY - p.y
+    local d = sqrt(dx * dx + dy * dy)
+    if d > 12 then p.knx, p.kny = dx / d * 3.2, dy / d * 3.2 end
+  end
   p.x, p.y = C.pushStructures(world.pushOut(p.x + p.vx + p.knx, p.y + p.vy + p.kny, 4))
   p.knx, p.kny = p.knx * 0.7, p.kny * 0.7
   p.moving = (ix ~= 0 or iy ~= 0)
@@ -1205,6 +1226,43 @@ function C.updateMobs()
           end
         end
 
+        -- mummy: telegraphed bandage throw that pulls you in
+        if d.pull and not m.dead then
+          m.pullCd = (m.pullCd or random(40, 120)) - 1
+          if m.pullW then
+            m.pullW = m.pullW - 1
+            mv = 0
+            if m.pullW <= 0 then
+              m.pullW = nil
+              local tx, ty = m.ptx - m.x, m.pty - (m.y - 8)
+              local l = max(0.01, sqrt(tx * tx + ty * ty))
+              eshots[#eshots + 1] = { x = m.x, y = m.y - 8, vx = tx / l * 4.5, vy = ty / l * 4.5, life = 32,
+                dmg = 0.5 * mobDmg(s) * (m.bdmg or 1), kind = "bandage", from = m }
+              m.atkAnim = 8
+            end
+          elseif m.pullCd <= 0 and dist > 35 and dist < 115 and (m.frozenT or 0) <= 0 and (R.pullGap or 0) <= R.tick then
+            m.pullW, m.ptx, m.pty = 16, p.x, p.y - 7
+            m.pullCd = random(120, 200)
+            R.pullGap = R.tick + 45   -- only one mummy throws at a time
+          end
+        end
+        -- mammoth: winds up, then charges in a straight line
+        if d.charge and not m.dead then
+          m.chargeCd = (m.chargeCd or random(60, 140)) - 1
+          if m.chargeW then
+            m.chargeW = m.chargeW - 1
+            mv = 0
+            if m.chargeW <= 0 then m.chargeW = nil; m.chargeT = 20 end
+          elseif m.chargeT then
+            m.chargeT = m.chargeT - 1
+            nx, ny, mv = m.cdx, m.cdy, 3.4
+            if m.chargeT <= 0 then m.chargeT = nil end
+          elseif m.chargeCd <= 0 and dist > 40 and dist < 150 and (m.frozenT or 0) <= 0 then
+            m.chargeW, m.cdx, m.cdy = 22, nx, ny
+            m.chargeCd = random(150, 230)
+          end
+        end
+
         if d.bomb and not m.dead then
           if m.fuse then
             m.fuse = m.fuse - 1
@@ -1266,7 +1324,7 @@ function C.updateMobs()
           end
           if not d.bomb and dist < r + 5 and (m.atk or 0) <= 0 and (m.frozenT or 0) <= 0 then
             local before = p.hp
-            C.hurtPlayer(d.dmg * mobDmg(s) * (m.elite and 1.5 or 1) * (m.bdmg or 1))
+            C.hurtPlayer(d.dmg * mobDmg(s) * (m.elite and 1.5 or 1) * (m.bdmg or 1) * (m.chargeT and 2 or 1))
             if (m.atkAnim or 0) <= 0 then m.atkAnim = 10 end
             if p.hp < before then
               if d.onHit then C.debuff(d.onHit) end
@@ -1293,6 +1351,10 @@ function C.updateEShots()
       local before = p.hp
       C.hurtPlayer(e.dmg)
       if e.onHit and p.hp < before then C.debuff(e.onHit) end
+      if e.kind == "bandage" and e.from and not e.from.dead then
+        p.pullT, p.pullX, p.pullY = 12, e.from.x, e.from.y
+        say("Pulled in!", 20, S.W)
+      end
       removeAt(eshots, i)
     elseif e.life <= 0 then
       removeAt(eshots, i)
@@ -1638,6 +1700,16 @@ function C.updateFx()
     b.t = b.t + 1
     if b.t > 10 then removeAt(R.booms, i) end
   end
+  -- poison clouds from bloaters
+  for i = #R.clouds, 1, -1 do
+    local c = R.clouds[i]
+    c.t = c.t - 1
+    if c.t % 8 == 0 then
+      local dx, dy = p.x - c.x, (p.y - 6) - c.y
+      if dx * dx + dy * dy < c.r * c.r and state == "play" then C.debuff("poison") end
+    end
+    if c.t <= 0 then removeAt(R.clouds, i) end
+  end
   if UI.msgTimer > 0 then UI.msgTimer = UI.msgTimer - 1 end
 end
 
@@ -1944,7 +2016,7 @@ function C.updateDamageStats()
   R.dmgTick = 0
   R.dps = R.dmgSum / 3
   for _, m in ipairs(mobs) do
-    if m.numAcc and m.numAcc > 0 and (m.dead or (R.tick + m.phase) % 10 == 0) then
+    if m.numAcc and m.numAcc >= 0.5 and (m.dead or (R.tick + m.phase) % 10 == 0) then
       if UI.showNums and #R.nums < 60 then
         R.nums[#R.nums + 1] = { x = m.x, y = m.y - (m.def.r * 2 + 10), v = m.numAcc, crit = m.numCrit, life = 16 }
       end
@@ -2094,6 +2166,8 @@ local function mobFrame(m)
   local atk = A.attack
   if atk then
     if m.fuse then return atk[floor(frame / 3) % #atk + 1] end
+    if m.pullW or m.chargeW then return atk[1] end
+    if m.chargeT then return atk[min(#atk, 2)] end
     if m.def.ranged and m.cd < 12 and m.cd > 0 then return atk[(m.cd < 6) and 2 or 1] end
     if (m.atkAnim or 0) > 0 then
       local n = #atk
@@ -2120,6 +2194,18 @@ local function renderWorld()
     for _ = 1, floor(f.r * 0.8) do
       local a, d = random() * 2 * pi, sqrt(random()) * f.r
       scr.pixel(f.x + cos(a) * d - camX, f.y + sin(a) * d - camY, (random() < 0.5) and S.O or S.R)
+    end
+  end
+
+  -- poison clouds
+  for ci, c in ipairs(R.clouds) do
+    local n = floor(26 * min(1, c.t / 40))
+    for k = 1, n do
+      local a = (k * 2.399 + ci) % (2 * pi)
+      local rr = c.r * (((k * 37 + floor(frame / 3)) % 17) / 17)
+      local x, y = c.x + cos(a + frame * 0.01) * rr - camX, c.y + sin(a) * rr * 0.7 - camY
+      local col = (k % 3 == 0) and S.g or ((k % 3 == 1) and S.Z or S.L)
+      scr.pixel(x, y, col); scr.pixel(x + 1, y, col)
     end
   end
 
@@ -2314,9 +2400,34 @@ local function renderWorld()
     if b.aoe then scr.pixel(bx - b.vx * 0.5, by - b.vy * 0.5, S.O)
     elseif not b.frag then scr.pixel(bx - b.vx * 0.3, by - b.vy * 0.3, b.col) end
   end
+  -- telegraphs: mummy bandage aim (dotted), mammoth charge lane (red dashes)
+  for _, m in ipairs(mobs) do
+    if m.pullW and not m.dead then
+      local dx, dy = m.ptx - m.x, m.pty - (m.y - 8)
+      local l = max(1, sqrt(dx * dx + dy * dy))
+      for k = 0, l, 4 do
+        if (k + frame) % 8 < 4 then scr.pixel(m.x + dx / l * k - camX, m.y - 8 + dy / l * k - camY, S.W) end
+      end
+    elseif m.chargeW and not m.dead then
+      for k = 6, 110, 3 do
+        if floor(k / 3) % 2 == 0 then
+          scr.pixel(m.x + m.cdx * k - camX, m.y - 4 + m.cdy * k - camY, (frame % 6 < 3) and S.R or S.O)
+        end
+      end
+    end
+  end
   for _, e in ipairs(eshots) do
     local l = sqrt(e.vx * e.vx + e.vy * e.vy)
     local ux, uy = e.vx / l, e.vy / l
+    if e.kind == "bandage" then
+      -- bandage: a wrapped strip with a line back to the mummy
+      if e.from and not e.from.dead then
+        local fx, fy = e.from.x, e.from.y - 8
+        local dx, dy = e.x - fx, e.y - fy
+        local d = max(1, sqrt(dx * dx + dy * dy))
+        for k = 0, d, 2 do scr.pixel(fx + dx / d * k - camX, fy + dy / d * k - camY, (floor(k / 2) % 2 == 0) and S.W or S.A) end
+      end
+    end
     scr.pixel(e.x - camX, e.y - camY, S.A)
     scr.pixel(e.x - ux - camX, e.y - uy - camY, S.B)
     scr.pixel(e.x - ux * 2 - camX, e.y - uy * 2 - camY, S.B)

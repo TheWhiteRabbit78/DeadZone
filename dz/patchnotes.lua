@@ -2,9 +2,18 @@
 
 local N = {}
 
-N.VERSION = "v2.91"
+N.VERSION = "v2.92"
 
 N.LIST = {
+  { "v2.92", "New biome mobs", {
+    "Yeti (snow brute, chills), Wendigo (fast snow hunter, chills)",
+    "Mammoth (frozen bog): winds up, then charges - watch the red lane",
+    "Mummy (desert): throws a bandage that pulls you in - dotted aim",
+    "  line warns you first, sidestep it",
+    "Scorpion (desert, poison), Wolf (forest, fast)",
+    "Bloater (swamp/jungle): pops into a poison cloud when it dies",
+    "Damage numbers under 1 no longer show as 0",
+  } },
   { "v2.91", "Easier start, biome rewards", {
     "Plains: only zombies, ghouls (from 1:30) and brutes (from 5:00)",
     "  no skeletons or bomb imps - but plains mobs toughen up over time",
