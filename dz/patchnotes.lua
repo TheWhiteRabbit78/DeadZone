@@ -2,9 +2,17 @@
 
 local N = {}
 
-N.VERSION = "v2.50"
+N.VERSION = "v2.60"
 
 N.LIST = {
+  { "v2.60", "Level-up cards", {
+    "Big LEVEL UP! / TREASURE! / HEAD START / BANISH banner",
+    "Cards deal in from below (rerolls deal a fresh hand)",
+    "Rarity frames: grey common, cyan rare, orange epic,",
+    "  gold legendary with studs and a running light",
+    "71 new hand-drawn item icons, one for every item",
+    "Pips show copies owned - the next one blinks; NEW on first copies",
+  } },
   { "v2.50", "Night city menus", {
     "Menus have their own night art: blood moon, stars, a ruined city",
     "  with lit windows and drifting embers, all with parallax",

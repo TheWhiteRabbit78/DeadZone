@@ -1298,6 +1298,7 @@ function C.startPick(kind)
   R.offerKind = kind
   R.banishMode = false
   R.offers = I.roll(owned, stats.luck, C.offerCount(), kind == "chest" and "epic" or nil, R.banned)
+  R.pickT = 0
   state = "pick"
   sfx("level")
 end
@@ -2054,44 +2055,131 @@ local function ownedList()
   return L
 end
 
+local RARFRAME = { common = S.A, rare = S.C, epic = S.O, legendary = S.Y }
+local ITEMART, itemSpr = require("dz.itemicons"), {}
+local function itemSprite(id)
+  if itemSpr[id] == nil then
+    local art = ITEMART[id]
+    if art then
+      -- drawn at 2x: every text cell then holds at most 2 art pixels (2 colours), so nothing gets lost
+      local big = {}
+      for _, r in ipairs(art) do
+        local d = r:gsub(".", "%0%0")
+        big[#big + 1] = d; big[#big + 1] = d
+      end
+      itemSpr[id] = G.compile(big)
+    else itemSpr[id] = false end
+  end
+  return itemSpr[id]
+end
+
+-- one level-up card: text cells x0..x0+w-1, y0..y0+h-1
+local function drawPickCard(it, i, x0, y0, w, h)
+  local rar = I.RARITY[it.rarity]
+  local rc = P.slot[rar.col]
+  local fc = R.banishMode and ((frame % 10 < 5) and S.R or S.D) or RARFRAME[it.rarity]
+  local legend = it.rarity == "legendary"
+  local px0, py0 = (x0 - 1) * 2, (y0 - 1) * 3
+  local pw, ph = w * 2, h * 3
+  -- face: pixel area for the icon, the pips and the divider; the rest is text
+  local iconY = y0 + 3
+  scr.rect(px0, py0, pw, ph, S.K)
+  Scn.frame(px0, py0, pw, ph, fc, it.rarity ~= "common", legend and S.W or nil)
+  if legend and not R.banishMode then -- light running around the frame
+    local per = 2 * (pw + ph)
+    for k = 0, 3 do
+      local q = (frame * 3 + k) % per
+      local x, y
+      if q < pw then x, y = px0 + q, py0 + 2
+      elseif q < pw + ph then x, y = px0 + pw - 2, py0 + q - pw
+      elseif q < 2 * pw + ph then x, y = px0 + pw - (q - pw - ph), py0 + ph - 3
+      else x, y = px0 + 1, py0 + ph - (q - 2 * pw - ph) end
+      scr.pixel(x, y, S.W)
+    end
+  end
+  local blank = (" "):rep(w - 2)
+  local function line(y, str, col) T(x0 + 1, y, blank, S.W, S.K); T(x0 + floor((w - #str) / 2), y, str, col, S.K) end
+  -- key + rarity
+  T(x0 + 1, y0 + 1, blank, S.W, S.K)
+  T(x0 + 2, y0 + 1, "[" .. i .. "]", S.W, S.K)
+  T(x0 + w - #rar.name - 2, y0 + 1, rar.name, rc, S.K)
+  T(x0 + 1, y0 + 2, blank, S.W, S.K)
+  -- big icon (24x24 art, falls back to a scaled mini icon)
+  local spr = itemSprite(it.id)
+  if spr then scr.sprite(spr, px0 + w - 24, (iconY - 1) * 3, false, R.banishMode and S.R or nil)
+  else Scn.icon(Sc.itemIcon(it), px0 + w - 16, (iconY - 1) * 3 + 6, R.banishMode and S.R or rc, 4) end
+  T(x0 + 1, y0 + 19, blank, S.W, S.K)
+  line(y0 + 20, it.name, S.W)
+  -- owned pips / NEW
+  local have = owned[it.id] or 0
+  if it.max > 1 and it.max < 999 then
+    local pipW = (it.max <= 5) and 6 or 4
+    local total = it.max * pipW - 2
+    local sx = px0 + floor((pw - total) / 2)
+    for k = 1, it.max do
+      local c = (k <= have) and rc or ((k == have + 1) and ((frame % 12 < 6) and S.W or rc) or S.D)
+      scr.rect(sx + (k - 1) * pipW, (y0 + 21 - 1) * 3 + 1, pipW - 2, 2, c)
+    end
+  elseif have == 0 and it.max < 999 then
+    line(y0 + 21, "NEW", S.g)
+  end
+  -- divider
+  for x = px0 + 8, px0 + pw - 9 do if x % 2 == 0 then scr.pixel(x, (y0 + 22 - 1) * 3 + 1, S.D) end end
+  -- stat lines
+  for j = 23, h - 2 do T(x0 + 1, y0 + j, blank, S.W, S.K) end
+  for j, ln in ipairs(it.lines) do
+    local bad = ln:sub(1, 1) == "!"
+    local text = bad and ln:sub(2) or ln
+    local col = bad and S.R or S.g
+    if text == "EVOLUTION" then col = (frame % 10 < 6) and S.Y or S.O end
+    text = text:sub(1, w - 3)
+    T(x0 + floor((w - #text) / 2), y0 + 22 + j, text, col, S.K)
+  end
+  local need = I.needsText(it)
+  if need then
+    local ww = w - 4
+    local a, b = need:sub(1, ww), need:sub(ww + 1, 2 * ww)
+    T(x0 + floor((w - #a) / 2), y0 + h - 4, a, S.A, S.K)
+    if #b > 0 then T(x0 + floor((w - #b) / 2), y0 + h - 3, b, S.A, S.K) end
+  end
+end
+
 local function renderPick()
   local n = #R.offers
-  local cardW = min(44, floor((CW - 8 - (n - 1) * 2) / n))
-  local w = cardW * n + (n - 1) * 2 + 4
-  local h = 24
-  local x0, y0 = floor((CW - w) / 2) + 1, floor((CH - h) / 2) + 1
-  frameBox(x0, y0, w, h, R.banishMode and S.R or S.Y)
-  center(y0 + 1, R.banishMode and "BANISH which item? (gone for this run)" or C.pickTitle(), R.banishMode and S.R or S.Y)
+  R.pickT = (R.pickT or 0) + 1
+  local cardW = min(40, floor((CW - 8 - (n - 1) * 3) / n))
+  cardW = cardW - cardW % 2
+  local cardH = 31
+  local total = cardW * n + (n - 1) * 3
+  local bannerH = 7
+  local top = floor((CH - (cardH + bannerH + 4)) / 2) + 1
+  local cy = top + bannerH + 1
+  -- banner
+  local word, sub, col, colTop
+  if R.banishMode then word, sub, col, colTop = "BANISH", "which item? gone for this run", S.R, S.O
+  elseif R.offerKind == "chest" then word, sub, col, colTop = "TREASURE!", "pick a reward", S.Y, S.W
+  elseif R.offerKind == "bonus" then word, sub, col, colTop = "HEAD START", "free pick", S.C, S.W
+  else word, sub, col, colTop = "LEVEL UP!", "level " .. (p.level - p.pending + 1), S.Y, S.W end
+  -- dark ribbon across the screen behind the banner
+  local ry0, ry1 = (top - 1) * 3 - 6, (top + 5) * 3 + 2
+  scr.rect(0, ry0, PW, ry1 - ry0, S.K)
+  for x = 0, PW - 1 do scr.pixel(x, ry0, col); scr.pixel(x, ry1 - 1, col) end
+  local bw = Scn.bigWidth(word, 2)
+  local bump = (R.pickT < 6) and (6 - R.pickT) or 0
+  Scn.bigText(word, floor((PW - bw) / 2), (top - 1) * 3 - bump, 2, col, colTop, false)
+  center(top + 5, sub, S.A, S.K)
+  -- cards deal in from below, one after another
   for i, it in ipairs(R.offers) do
-    local cx = x0 + 2 + (i - 1) * (cardW + 2)
-    local rar = I.RARITY[it.rarity]
-    local rc = P.slot[rar.col]
-    box(cx, y0 + 3, cardW, 17, S.D)
-    T(cx, y0 + 3, (" "):rep(cardW), S.K, rc)
-    T(cx + 1, y0 + 3, "[" .. i .. "]  " .. rar.name, S.K, rc)
-    T(cx + 2, y0 + 5, it.name, S.W, S.D)
-    if it.max > 1 and it.max < 999 then
-      T(cx + 2, y0 + 6, ("owned %d / %d"):format(owned[it.id] or 0, it.max), S.A, S.D)
-    end
-    for j, ln in ipairs(it.lines) do
-      local bad = ln:sub(1, 1) == "!"
-      local text = bad and ln:sub(2) or ln
-      local col = bad and S.R or S.g
-      if text == "EVOLUTION" then col = S.Y end
-      T(cx + 2, y0 + 7 + j, text:sub(1, cardW - 3), col, S.D)
-    end
-    local need = I.needsText(it)
-    if need then
-      -- wrap onto two lines if the card is narrow
-      local w = cardW - 4
-      T(cx + 2, y0 + 16, need:sub(1, w), S.A, S.D)
-      if #need > w then T(cx + 2, y0 + 17, need:sub(w + 1, 2 * w), S.A, S.D) end
-    end
+    local t = R.pickT - (i - 1) * 3
+    local off = 0
+    if t < 10 then off = floor(((10 - max(0, t)) / 10) ^ 2 * (CH - cy + 2)) end
+    local x0 = floor((CW - total) / 2) + 1 + (i - 1) * (cardW + 3)
+    if cy + off <= CH then drawPickCard(it, i, x0, cy + off, cardW, cardH) end
   end
   local keysTxt = (n == 4) and "1 2 3 4  pick" or "1 2 3  pick"
   if R.rerolls > 0 then keysTxt = keysTxt .. "      R reroll (" .. R.rerolls .. ")" end
   if R.banishes > 0 then keysTxt = keysTxt .. "      B banish (" .. R.banishes .. ")" end
-  center(y0 + 22, keysTxt, S.W)
+  center(cy + cardH + 1, " " .. keysTxt .. " ", S.W, S.K)
 end
 
 local function renderPause()
@@ -2467,6 +2555,7 @@ local function onKey(k)
     elseif k == keys.r and R.rerolls > 0 and not R.banishMode then
       R.rerolls = R.rerolls - 1
       R.offers = I.roll(owned, stats.luck, C.offerCount(), R.offerKind == "chest" and "epic" or nil, R.banned)
+      R.pickT = 0
     elseif k == keys.b and R.banishes > 0 then
       R.banishMode = not R.banishMode
     end

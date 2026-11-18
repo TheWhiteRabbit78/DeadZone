@@ -38,6 +38,17 @@ Sc.ICON = {
   card = { ".####...", ".#..####", ".#..#..#", ".#..#..#", ".####..#", "....#..#", "....####", "........", "........" },
   crown = { "#..##..#", "#..##..#", "##.##.##", "########", "########", "########", "........", "########", "........" },
   skull = { ".######.", "########", "#..##..#", "#..##..#", "########", ".##..##.", ".######.", ".#.##.#.", "........" },
+  coin = { "..####..", ".##..##.", "##.##.##", "##.##.##", "##.##.##", "##.##.##", ".##..##.", "..####..", "........" },
+  saw = { ".#.##.#.", "########", ".##..##.", "###..###", "###..###", ".##..##.", "########", ".#.##.#.", "........" },
+  flask = { "..####..", "...##...", "...##...", "..####..", ".######.", "##.#####", "####.###", ".######.", "........" },
+  rocket = { "......##", ".....###", "....###.", ".#.###..", "..###...", ".###....", "###.#...", "##......", "........" },
+  orb = { "..####..", ".######.", "##.#####", "#.######", "########", "########", ".######.", "..####..", "........" },
+  crystal = { "...##...", "..####..", ".##.###.", ".##.###.", ".######.", ".######.", "..####..", "...##...", "........" },
+  fang = { "########", "########", "##....##", "##....##", ".#....#.", ".#....#.", "........", "........", "........" },
+  meat = { "....###.", "...#####", "...#####", "....###.", "...##...", "..##....", ".#......", "##......", "........" },
+  round = { "...##...", "..####..", "..####..", "..####..", "..####..", "..####..", "........", ".######.", ".######." },
+  split = { "#......#", ".#....#.", "..#..#..", "...##...", "...##...", "...##...", "...##...", "...##...", "........" },
+  axe = { ".####...", "######..", "#######.", ".#####..", "...##...", "...##...", "...##...", "...##...", "........" },
   lock = { "..####..", ".##..##.", ".#....#.", ".#....#.", "########", "###..###", "###..###", "########", "........" },
 }
 -- compile to pixel offset lists
@@ -59,6 +70,26 @@ local ICONOF = { gundmg_pct = "gun", rate_pct = "bullets", crit = "cross", critd
   banish = "banish", drops_pct = "chest", choices = "card", bosschests = "chest", headstart = "book" }
 local STARTICON = { weapon = "gun", rare = "gem", firering = "flame", spell = "star", eshield = "shield" }
 
+-- level-up items
+local ITEMICON = {
+  sharp = "round", oil = "bullets", boots = "boot", skin = "heart", charm = "magnet", scope = "cross", bandage = "plus",
+  coin = "coin", notes = "book", powder = "bomb", padding = "shield", focus = "crystal", barrel = "bullets", ap = "arrow",
+  heavy = "round", hair = "bullets", hollow = "cross", plate = "shield", saw = "saw", aura = "flask", w2 = "gun", w3 = "gun",
+  w4 = "rocket", exround = "burst", bigbang = "burst", mortar = "bomb", spike = "spikes", leech = "drop", eshield = "shield",
+  firering = "flame", meteor = "star", frost = "snow", thunder = "bolt", orbs = "orb", glass = "crystal", blood = "drop",
+  greed = "coin", overclock = "hourglass", coil = "bolt", split = "split", rico = "arrow", corpse = "skull", demo = "bomb",
+  marks = "cross", shrap = "burst", napalm = "flame", jugg = "shield", retal = "spikes", pyro = "flame", permafrost = "snow",
+  conductor = "bolt", hell = "bullets", vamp = "fang", exec = "axe", midas = "crown", chainre = "burst", bulwark = "shield",
+  wind = "heart", archmage = "star", sawstorm = "saw", nuke = "rocket", plague = "flask", maiden = "spikes", inferno = "flame",
+  armageddon = "star", zero = "snow", snack = "meat",
+}
+function Sc.itemIcon(it)
+  if ITEMICON[it.id] then return ITEMICON[it.id] end
+  if it.id:match("^shard") then return "gem" end
+  for k in pairs(it.mods or {}) do if ICONOF[k] then return ICONOF[k] end end
+  return "star"
+end
+
 function Sc.iconFor(n)
   if n.id == "root" then return "skull" end
   if n.id:match("_apex$") then return "crown" end
@@ -75,7 +106,19 @@ local FONT = {
   Z = { "#####", "....#", "...#.", "..#..", ".#...", "#....", "#####" },
   O = { ".###.", "#...#", "#...#", "#...#", "#...#", "#...#", ".###." },
   N = { "#...#", "##..#", "#.#.#", "#..##", "#...#", "#...#", "#...#" },
+  L = { "#....", "#....", "#....", "#....", "#....", "#....", "#####" },
+  V = { "#...#", "#...#", "#...#", "#...#", "#...#", ".#.#.", "..#.." },
+  U = { "#...#", "#...#", "#...#", "#...#", "#...#", "#...#", ".###." },
+  P = { "####.", "#...#", "#...#", "####.", "#....", "#....", "#...." },
+  T = { "#####", "..#..", "..#..", "..#..", "..#..", "..#..", "..#.." },
+  R = { "####.", "#...#", "#...#", "####.", "#.#..", "#..#.", "#...#" },
+  S = { ".####", "#....", "#....", ".###.", "....#", "....#", "####." },
+  H = { "#...#", "#...#", "#...#", "#####", "#...#", "#...#", "#...#" },
+  B = { "####.", "#...#", "#...#", "####.", "#...#", "#...#", "####." },
+  I = { "###", ".#.", ".#.", ".#.", ".#.", ".#.", "###" },
+  ["!"] = { "#", "#", "#", "#", "#", ".", "#" },
 }
+Sc.FONT = FONT
 
 ----------------------------------------------------------------------- scenery object
 function Sc.new(scr, G, P)
@@ -305,6 +348,41 @@ function Sc.new(scr, G, P)
     for i = 1, #p, 2 do
       if scale == 1 then scr.pixel(x + p[i], y + p[i + 1], col)
       else scr.rect(x + p[i] * scale, y + p[i + 1] * scale, scale, scale, col) end
+    end
+  end
+
+  -------------------------------------------------------------------- big pixel text
+  function self.bigWidth(str, scale)
+    local w = 0
+    for i = 1, #str do
+      local f = FONT[str:sub(i, i)]
+      w = w + (f and (#f[1] + 1) or 4) * scale
+    end
+    return w - scale
+  end
+  -- str in the pixel font; top rows in colTop, drop shadow in K
+  function self.bigText(str, x, y, scale, col, colTop, shadow)
+    for pass = (shadow and 1 or 2), 2 do
+      local cx = x
+      for i = 1, #str do
+        local f = FONT[str:sub(i, i)]
+        if f then
+          local fw = #f[1]
+          for fy = 1, 7 do
+            local row = f[fy]
+            for fx = 1, fw do
+              if row:sub(fx, fx) == "#" then
+                local c = (pass == 1) and K_ or ((fy == 1 and colTop) or col)
+                local o = (pass == 1) and 1 or 0
+                scr.rect(cx + (fx - 1) * scale + o, y + (fy - 1) * scale + o, scale, scale, c)
+              end
+            end
+          end
+          cx = cx + (fw + 1) * scale
+        else
+          cx = cx + 4 * scale
+        end
+      end
     end
   end
 
