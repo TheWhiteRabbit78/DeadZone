@@ -764,4 +764,43 @@ S.crypt_chest = {
   "KKKKKKKK",
 }
 
+-- the Reaper (hunts you after 20:00) and the evac chopper
+S.reaper = {
+  "..........AAAAAAB.",
+  ".........AAWW...B.",
+  "........AA......B.",
+  "....KKKKK.......B.",
+  "...KDDDDDK......B.",
+  "..KDDKKKDDK.....B.",
+  "..KDKWWWKDK.....B.",
+  "..KDKRWRKDK.....B.",
+  "..KDKWWWKDK....KB.",
+  "..KDDKWKDDK...KSB.",
+  ".KDDDDKDDDDKKKSKB.",
+  ".KDKDDDDDDKDDSK.B.",
+  ".KDKDDDDDDDKKK..B.",
+  "KDDKDDDDDDDK....B.",
+  "KDKDDDDDDDDK....B.",
+  "KDKDDDDDDDDDK...B.",
+  "KDDKDDDDDDDDK...B.",
+  ".KDDDKDDDKDDK...B.",
+  ".KDDKDDKDDKDDK..B.",
+  "..KK.KK.KKK.KK....",
+}
+
+S.chopper = {
+  "............K..................",
+  "..........KKKKKKKK.............",
+  "........KKAAAAAAAAK............",
+  ".......KCCKAAWWWAAAK.......KKK.",
+  "......KCCCKAAAAAAAAAKKKKKKKKAK.",
+  "......KCWCKAAAAAAAAAAAAAAAAAAAK",
+  "......KCCCKAAAAAAAAAKKKKKKKKKK.",
+  ".......KKKAAAAAAAAAAK..........",
+  "........KKAAAAAAAAAK...........",
+  ".........KKKKKKKKKK............",
+  "..........K......K.............",
+  "........KKKKKKKKKKKK...........",
+}
+
 return S

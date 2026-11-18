@@ -77,7 +77,7 @@ I.LIST = {
   { id = "mortar",  name = "Mortar",        rarity = "rare", max = 4, mods = { mortar = 1 },             lines = { "+1 shell every 2s on a mob" } },
   -- tank line
   { id = "spike",   name = "Spiked Armor",  rarity = "rare", max = 3, mods = { thorns = 1 },             lines = { "Getting hit blasts mobs around you", "Damage grows with armor" } },
-  { id = "leech",   name = "Leech Rounds",  rarity = "rare", max = 3, mods = { lifesteal = 0.01 },       lines = { "Heal 1% of damage dealt" } },
+  { id = "leech",   name = "Leech Rounds",  rarity = "rare", max = 3, mods = { lifesteal = 0.01 },       lines = { "Heal 1% of damage dealt", "(max 1% HP per second)" } },
   { id = "eshield", name = "Energy Shield", rarity = "rare", max = 3, mods = { shield = 1 },             lines = { "Blocks a hit every 12s", "More copies recharge faster" } },
   -- mage line
   { id = "firering", name = "Fire Ring",    rarity = "rare", max = 5, mods = { firering = 1 },           lines = { "Ring of flames burns mobs near you", "Bigger and hotter per level" } },
@@ -107,7 +107,7 @@ I.LIST = {
 
   ---------------------------------------------------------------- legendary
   { id = "hell",   name = "Bullet Hell",    rarity = "legendary", max = 1, mods = { proj = 3, wdmg_x = 0.6 }, lines = { "+3 projectiles, all weapons", "!-40% weapon damage" } },
-  { id = "vamp",   name = "Vampire Fangs",  rarity = "legendary", max = 1, mods = { lifesteal = 0.03, regen_x = 0 }, lines = { "Heal 3% of damage dealt", "!No HP regen" } },
+  { id = "vamp",   name = "Vampire Fangs",  rarity = "legendary", max = 1, mods = { lifesteal = 0.03, regen_x = 0 }, lines = { "Heal 3% of damage dealt", "(max 3% HP per second)", "!No HP regen" } },
   { id = "exec",   name = "Executioner",    rarity = "legendary", max = 1, mods = { crit = 0.12, critdmg = 1.5 }, lines = { "+12% crit chance", "+150% crit damage" } },
   { id = "midas",  name = "Midas Crown",    rarity = "legendary", max = 1, mods = { luck = 3, xp_pct = 0.3, spawn_pct = 0.2 }, lines = { "Much rarer items", "+30% XP", "!+20% more mobs" } },
   { id = "chainre", name = "Chain Reaction", rarity = "legendary", max = 1, mods = { chainreact = 0.3 }, lines = { "30%: explosions set off", "another one nearby" } },
@@ -169,7 +169,7 @@ I.MILITARY = {
   { id = "m_drum",   name = "Drum Magazines",     rarity = "military", max = 1, mods = { proj = 3 },                 lines = { "+3 projectiles, all weapons" } },
   { id = "m_armor",  name = "Spec-Ops Armor",     rarity = "military", max = 1, mods = { armor = 4, maxhp = 5 },     lines = { "+4 armor", "+50 max HP" }, heal = 5 },
   { id = "m_target", name = "Targeting Computer", rarity = "military", max = 1, mods = { crit = 0.25, critdmg = 1 }, lines = { "+25% crit chance", "+100% crit damage" } },
-  { id = "m_medic",  name = "Field Medic Kit",    rarity = "military", max = 1, mods = { regen = 4, lifesteal = 0.02 }, lines = { "+40 HP every 10s", "Heal 2% of damage dealt" } },
+  { id = "m_medic",  name = "Field Medic Kit",    rarity = "military", max = 1, mods = { regen = 4, lifesteal = 0.02 }, lines = { "+40 HP every 10s", "Heal 2% of damage dealt", "(max 2% HP per second)" } },
   { id = "m_uplink", name = "Command Uplink",     rarity = "military", max = 1, mods = { dmg_x = 1.5, xp_pct = 0.25 }, lines = { "x1.5 all damage", "+25% XP" } },
 }
 function I.rollMilitary(owned, n)
@@ -323,6 +323,27 @@ function I.armorReduction(armor)
   return armor / (armor + 6)
 end
 
+-- build slots: 4 weapons, 6 spells, 6 passives. Once a group is full only
+-- upgrades for what you already own are offered. Evolutions, shards and
+-- military rewards don't take a slot.
+I.SPELL_IDS = { saw = true, aura = true, mortar = true, firering = true, meteor = true, frost = true, thunder = true, orbs = true }
+I.SLOTS = { spell = 6, passive = 6 }
+I.SLOT_NAME = { spell = "SPELL", passive = "PASSIVE", weapon = "WEAPON" }
+for _, it in ipairs(I.LIST) do
+  if it.weapon then it.slot = "weapon"
+  elseif it.req then it.slot = nil
+  elseif I.SPELL_IDS[it.id] then it.slot = "spell"
+  else it.slot = "passive" end
+end
+function I.slotCount(owned, kind)
+  local n = 0
+  for _, it in ipairs(I.LIST) do if it.slot == kind and (owned[it.id] or 0) > 0 then n = n + 1 end end
+  return n
+end
+function I.slotFull(owned, kind)
+  return I.SLOTS[kind] ~= nil and I.slotCount(owned, kind) >= I.SLOTS[kind]
+end
+
 -- you carry at most 4 weapons (the pistol is always one of them)
 function I.weaponCount(owned)
   local n = 1
@@ -333,6 +354,7 @@ end
 local function available(it, owned, banned)
   if banned and banned[it.id] then return false end
   if it.weapon and I.weaponCount(owned) >= 4 then return false end
+  if it.slot and (owned[it.id] or 0) == 0 and I.slotFull(owned, it.slot) then return false end
   if (owned[it.id] or 0) >= it.max then return false end
   if it.needsAny then
     local has = false

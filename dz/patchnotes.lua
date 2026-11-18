@@ -2,9 +2,27 @@
 
 local N = {}
 
-N.VERSION = "v3.10"
+N.VERSION = "v3.20"
 
 N.LIST = {
+  { "v3.20", "Runs have an ending", {
+    "Build slots: 4 weapons, 6 spells, 6 passives",
+    "  once a group is full you only get upgrades - commit to a build",
+    "  cards show NEW SPELL 3/6 / NEW PASSIVE / UPGRADE",
+    "EXTRACTION at 15:00: a flare marks the landing zone",
+    "  hold the zone for 15s while the horde rushes you",
+    "  extract: souls x1.5 +100 and +5000 score",
+    "THE REAPER at 20:00 if you haven't left - unkillable, gets faster",
+    "Late game hits back: mobs hit harder after 8:00, more HP after 12:00,",
+    "  shorter hit immunity late, so standing in a horde kills you",
+    "Lifesteal heals at most its % of your max HP per second",
+    "Elite affixes from 8:00 (coloured mark + flash):",
+    "  Ashen (fire-proof), Frostborn (frost-proof), Grounded",
+    "  (lightning-proof), Warded (shield), Splitter (splits on death)",
+    "Screen shake only from blasts near you and big deaths",
+    "Followers and survivors have HP bars",
+    "Your name is shown above your character",
+  } },
   { "v3.10", "Cursed cemeteries", {
     "Tiny, very rare fenced graveyards far from the start",
     "Guarded by the risen dead - 5x HP, 2.5x damage, they stay inside:",

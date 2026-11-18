@@ -77,6 +77,10 @@ do
   spr.merc_mg = G.compile(rc(SPR.mg_nest, { A = "D", S = "A", N = "D" }))
   spr.armory = G.compile(rc(SPR.chest, { N = "D", B = "K", Y = "R" }))
   spr.flag_red = G.compile(rc(SPR.flag, { C = "R", W = "K" }))
+  -- the Reaper is drawn at double size: it should loom over everything
+  local big = {}
+  for _, r in ipairs(SPR.reaper) do local d = r:gsub(".", "%0%0"); big[#big + 1] = d; big[#big + 1] = d end
+  spr.reaper = G.compile(big)
 end
 -- player shirt colour changes with prestige
 local PRESTIGE_SHIRT = { "U", "C", "g", "Y", "O", "R", "W", "A", "Z", "N", "Y" }
@@ -163,6 +167,7 @@ local MOBS = {
   grave_pike   = { spr = "grave_pike",   hp = 34, speed = 0.55, dmg = 1, xp = 8, score = 200, r = 5, pike = true },
   grave_shield = { spr = "grave_shield", hp = 30, speed = 0.45, dmg = 2, xp = 8, score = 200, r = 6, shielded = 45 },
   merc     = { spr = "merc",     hp = 70,  speed = 0,    dmg = 0, xp = 8,  score = 200,  r = 5,  heavy = true, static = true, merc = true },
+  reaper   = { spr = "reaper",   hp = 1e12, speed = 1.6, dmg = 0, xp = 0, score = 0, r = 10, heavy = true, reaper = true },
   merc_mg  = { spr = "merc_mg",  hp = 280, speed = 0,    dmg = 0, xp = 25, score = 600,  r = 9,  heavy = true, static = true, merc = true, mg = true },
 }
 local SPAWN_ORDER = { "zombie", "ghoul", "brute", "skeleton", "bomb_imp" }
@@ -312,10 +317,25 @@ local function secs() return R.tick / TPS end
 -- difficulty: gentle start, then compounding after minute 4
 local function hpMul(s)
   local m = s / 60
-  return (1 + 0.3 * m ^ 1.5) * 1.2 ^ max(0, m - 4) * 1.12 ^ max(0, m - 10) * Tree.prestigeMobHp(prof.prestige)
+  return (1 + 0.3 * m ^ 1.5) * 1.2 ^ max(0, m - 4) * 1.12 ^ max(0, m - 10) * 1.1 ^ max(0, m - 12) * Tree.prestigeMobHp(prof.prestige)
 end
 local function speedMul(s) return (1 + min(0.45, s / 800)) * Tree.prestigeMobSpeed(prof.prestige) end
-local function mobDmg(s) return 1 + 0.15 * (s / 60) end                         -- mob hits +15% per minute
+-- mob hits +15% per minute, and climbing faster after minute 8
+local function mobDmg(s) local m = s / 60 return 1 + 0.15 * m + 0.025 * max(0, m - 8) ^ 2 end
+-- hit immunity after a hit: generous early, short late so hordes stay dangerous
+local function hitIframes(s) return 18 - 10 * max(0, min(1, (s - 300) / 600)) end
+-- elite affixes (from 8:00): resist one element, a shield, or splitting on death
+local AFFIX = {
+  ashen     = { col = "O", name = "ASHEN",     immune = "fire" },
+  frostborn = { col = "C", name = "FROSTBORN", immune = "frost" },
+  grounded  = { col = "Y", name = "GROUNDED",  immune = "lightning" },
+  warded    = { col = "A", name = "WARDED" },
+  splitter  = { col = "g", name = "SPLITTER" },
+}
+local AFFIX_LIST = { "ashen", "frostborn", "grounded", "warded", "splitter" }
+local function affixChance(s) local m = s / 60 return (m < 8) and 0 or min(1, 0.4 + 0.1 * (m - 8)) end
+-- run ending: the chopper comes at 15:00, the Reaper at 20:00
+local EXTRACT_AT, REAPER_AT, EXTRACT_HOLD = 15 * 60, 20 * 60, 15 * TPS
 local function mobRes(s) return min(0.7, 0.03 * max(0, s / 60 - 3)) end       -- damage resistance
 local function eliteChance(s) return (s < 300) and 0 or min(0.35, 0.04 * (s / 60 - 4)) end
 local function allyScale(s) return 1 + 0.12 * (s / 60) end   -- soldiers/followers grow slower than mobs
@@ -509,10 +529,12 @@ end
 
 function C.damageMob(m, dmg, kx, ky, raw, src)
   if m.dead then return end
+  if m.def.reaper then return end   -- nothing kills the Reaper
   if src then
     local e = ELEM[src]
     local bm = e and R.bmod and R.bmod[e]
     if bm then dmg = dmg * bm end
+    if e and m.immune == e then dmg = dmg * 0.1 end
     local f = FAMSRC[src]
     if f and R.fam then dmg = dmg * R.fam[f] end
   end
@@ -521,7 +543,13 @@ function C.damageMob(m, dmg, kx, ky, raw, src)
     if (m.shockT or 0) > 0 then dmg = dmg * (1.25 + stats.conductor) end
     if (m.burnT or 0) > 0 and stats.pyro > 0 then dmg = dmg * (1 + stats.pyro) end
     if ((m.frozenT or 0) > 0 or (m.chillT or 0) > 0) and stats.permafrost > 0 then dmg = dmg * (1 + stats.permafrost) end
-    if stats.lifesteal > 0 then p.hp = min(p.maxHp, p.hp + dmg * stats.lifesteal) end
+    -- lifesteal: heals at most lifesteal x max HP per second, so AoE can't
+    -- turn 30 hits into 30 heals
+    if stats.lifesteal > 0 and (p.lsBud or 0) > 0 and p.hp < p.maxHp then
+      local h = min(p.lsBud, dmg * stats.lifesteal)
+      p.lsBud = p.lsBud - h
+      p.hp = min(p.maxHp, p.hp + h)
+    end
   end
   if src or not raw then
     -- damage stats: per source, DPS, floating numbers (overkill not counted)
@@ -559,6 +587,7 @@ function C.damageMob(m, dmg, kx, ky, raw, src)
 end
 
 function C.burn(m, power)
+  if m.immune == "fire" then return end
   m.burnT = 60
   m.burnP = max(m.burnP or 0, power * stats.burn)
 end
@@ -593,7 +622,11 @@ function C.explode(x, y, rad, dmg, o)
     local v = rad / 7 * (0.5 + random())
     addPart(x, y, cos(a) * v, sin(a) * v, random(4, 9), cols[random(4)])
   end
-  if not o.small then UI.shake = max(UI.shake, 3) end
+  -- shake only for things that matter: enemy blasts close to you, boss/nest deaths
+  if not o.player and not o.small then
+    local dx, dy = p.x - x, p.y - 6 - y
+    if dx * dx + dy * dy < (rad + (o.hurts and 30 or 60)) ^ 2 then UI.shake = max(UI.shake, 2) end
+  end
   sfx("boom")
 
   if o.player and not o.small then
@@ -644,9 +677,9 @@ function C.hurtPlayer(dmg)
   end
   dmg = dmg * (1 - I.armorReduction(stats.armor))
   p.hp = p.hp - dmg
-  p.iframes = floor(18 * stats.iframes)
+  p.iframes = floor(hitIframes(secs()) * stats.iframes)
   if stats.retal > 0 then p.retalT = 60 end
-  if dmg >= 2 then UI.shake = max(UI.shake, 2) end
+  if dmg >= p.maxHp * 0.15 then UI.shake = max(UI.shake, 2) end
   burst(p.x, p.y - 7, 6, S.R, 1.2)
   sfx("hurt")
   if stats.thorns > 0 then C.thornBlast(1) end
@@ -731,6 +764,16 @@ function C.killMob(m)
       pickups[#pickups + 1] = { x = m.x, y = m.y, kind = "magnet", ttl = 30 * TPS }
     end
   end
+  -- splitter elites burst into two smaller copies
+  if m.affix == "splitter" and #mobs < mobCap(secs()) + 40 then
+    for k = -1, 1, 2 do
+      local c = C.spawnMob(m.kind, m.x + k * 7, m.y + random(-3, 3))
+      c.elite, c.affix, c.immune, c.shield = nil, nil, nil, nil
+      c.hp = m.maxHp * 0.15; c.maxHp = c.hp
+      c.bdmg, c.reward = m.bdmg, (m.reward or 1) * 0.5
+    end
+    burst(m.x, m.y - 6, 10, S.g, 1.6)
+  end
   if m.def.bomb and not m.exploded then
     m.exploded = true
     if #R.boomQ < 60 then R.boomQ[#R.boomQ + 1] = { m.x, m.y - 6, 26, 25, false } end
@@ -761,10 +804,17 @@ function C.spawnMob(kind, x, y)
     flash = 0, cd = random(30, 70), phase = random(0, 11), flip = false,
     bdmg = dmgB, reward = B.reward, bio = bio,
   }
-  if not d.boss and not d.static and kind ~= "bomb_imp" and random() < eliteChance(s) then
+  if d.reaper then m.immune = "all" end
+  if not d.boss and not d.static and not d.reaper and kind ~= "bomb_imp" and random() < eliteChance(s) then
     m.elite = true
     m.hp = m.hp * 4
     m.speed = m.speed * 1.1
+    if random() < affixChance(s) then
+      local a = AFFIX_LIST[random(#AFFIX_LIST)]
+      m.affix = a
+      m.immune = AFFIX[a].immune
+      if a == "warded" then m.shield = m.hp * 0.6; m.shieldMax = m.shield end
+    end
   end
   m.maxHp = m.hp
   mobs[#mobs + 1] = m
@@ -1157,6 +1207,7 @@ function C.updatePlayer()
   end
   if p.fx < -0.1 then p.flip = true elseif p.fx > 0.1 then p.flip = false end
 
+  p.lsBud = p.maxHp * min(0.05, stats.lifesteal) / TPS
   p.cd = max(-1, p.cd - 1)
   if shooting and p.cd <= 0 then C.fire() end
   if p.iframes > 0 then p.iframes = p.iframes - 1 end
@@ -1198,7 +1249,7 @@ function C.updateMobs()
       elseif dist > 460 and m.keep then
         -- cemetery guards wait for you
       elseif dist > 460 then
-        if d.boss then
+        if d.boss or d.reaper then
           local x, y = C.spawnPos()
           if x then m.x, m.y = x, y end
         else
@@ -1219,7 +1270,7 @@ function C.updateMobs()
           tdist = sqrt(tx * tx + ty * ty)
           if tdist > 0.01 then nx, ny = tx / tdist, ty / tdist end
           if tdist < 14 then mv = 0 end
-        elseif not d.boss then
+        elseif not d.boss and not d.reaper then
           for _, o in ipairs(R.activeOutposts) do
             if o.state == "alive" then
               local ox, oy = o.x - m.x, (o.y - 2) - m.y
@@ -1233,7 +1284,10 @@ function C.updateMobs()
           end
         end
 
-        -- status effects
+        -- status effects (affixed elites and the Reaper shrug some off)
+        if m.immune == "lightning" then m.shockT = nil
+        elseif m.immune == "frost" then m.frozenT, m.chillT = nil, nil
+        elseif m.immune == "all" then m.shockT, m.frozenT, m.chillT, m.burnT, m.stun = nil, nil, nil, nil, nil end
         if m.burnT and m.burnT > 0 then
           m.burnT = m.burnT - 1
           if m.burnT % 10 == 0 then
@@ -1356,7 +1410,7 @@ function C.updateMobs()
         if not m.dead then
           m.x = m.x + nx * mv
           m.y = m.y + ny * mv
-          if not d.boss then m.x, m.y = C.pushStructures(world.pushOut(m.x, m.y, 3)) end
+          if not d.boss and not d.reaper then m.x, m.y = C.pushStructures(world.pushOut(m.x, m.y, 3)) end
           m.moving = mv ~= 0
           m.walkP = (m.walkP or 0) + abs(mv)
 
@@ -1370,8 +1424,8 @@ function C.updateMobs()
               if d2 < rr * rr and d2 > 0.0001 then
                 local dd = sqrt(d2)
                 local push = (rr - dd) * 0.5
-                if o.def.boss then push = push * 2 end
-                if not d.boss then
+                if o.def.boss or o.def.reaper then push = push * 2 end
+                if not d.boss and not d.reaper then
                   m.x = m.x + ox / dd * push
                   m.y = m.y + oy / dd * push
                 end
@@ -1387,7 +1441,11 @@ function C.updateMobs()
             m.atkAnim = 10
             addPart(siege.x + random(-6, 6), siege.y - 8, 0, -0.4, 5, S.R)
           end
-          if not d.bomb and dist < r + 5 and (m.atk or 0) <= 0 and (m.frozenT or 0) <= 0 then
+          if d.reaper and dist < r + 6 and (m.atk or 0) <= 0 then
+            -- the Reaper ignores armor: every touch takes 45% of your max HP
+            C.hurtPlayer(p.maxHp * 0.45 / max(0.2, 1 - I.armorReduction(stats.armor)))
+            m.atk, m.atkAnim = 20, 10
+          elseif not d.bomb and not d.reaper and dist < r + 5 and (m.atk or 0) <= 0 and (m.frozenT or 0) <= 0 then
             local before = p.hp
             C.hurtPlayer(d.dmg * mobDmg(s) * (m.elite and 1.5 or 1) * (m.bdmg or 1) * (m.chargeT and 2 or 1))
             if (m.atkAnim or 0) <= 0 then m.atkAnim = 10 end
@@ -1703,6 +1761,7 @@ function C.updateSpawns()
   R.spawnTimer = R.spawnTimer - 1
   if R.spawnTimer <= 0 then
     R.spawnTimer = max(5, floor((34 - s / 10 + max(0, 120 - s) / 5) / stats.spawn))
+    if R.lz and R.lz.inside then R.spawnTimer = max(3, floor(R.spawnTimer * 0.5)) end
     local batch = 1 + floor(s / 90)
     for _ = 1, batch do
       if #mobs < mobCap(s) then
@@ -1710,6 +1769,11 @@ function C.updateSpawns()
         if x then C.spawnMob(C.pickType(s), x, y) end
       end
     end
+  end
+
+  if not R.affixSaid and affixChance(s) > 0 then
+    R.affixSaid = true
+    say("ELITES NOW CARRY AFFIXES  -  the coloured mark shows what they resist", 110, S.O)
   end
 
   if R.tick >= R.nextHorde then
@@ -1734,7 +1798,7 @@ function C.updateSpawns()
     end
   end
 
-  if R.tick >= R.nextBoss then
+  if R.tick >= R.nextBoss and s < EXTRACT_AT then
     R.nextBoss = R.nextBoss + 180 * TPS
     local x, y = C.spawnPos()
     if x then
@@ -1781,6 +1845,68 @@ function C.updateFx()
     if c.t <= 0 then removeAt(R.clouds, i) end
   end
   if UI.msgTimer > 0 then UI.msgTimer = UI.msgTimer - 1 end
+end
+
+---------------------------------------------------------------------- extraction + the Reaper
+function C.updateExtract(s)
+  if s >= EXTRACT_AT and not R.lz then
+    -- landing zone: open ground a screen or so away, never inside a base
+    local spot
+    for _ = 1, 30 do
+      local a = random() * 2 * pi
+      local d = 230 + random() * 120
+      local x, y = floor(p.x + cos(a) * d), floor(p.y + sin(a) * d * 0.8)
+      local nx, ny = world.pushOut(x, y, 26)
+      if nx == x and ny == y and not world.nearBase(x, y, 90) then spot = { x, y } break end
+    end
+    spot = spot or { floor(p.x + 180), floor(p.y) }
+    R.lz = { x = spot[1], y = spot[2], r = 34, hold = 0, inside = false }
+    say("EXTRACTION!  A chopper is coming - get to the landing zone", 130, S.g)
+    sfx("level")
+  end
+  local lz = R.lz
+  if not lz then return end
+  local dx, dy = p.x - lz.x, p.y - lz.y
+  lz.inside = dx * dx + dy * dy <= lz.r * lz.r
+  if lz.inside then lz.hold = lz.hold + 1 elseif lz.hold > 0 then lz.hold = max(0, lz.hold - 0.5) end
+  -- red flare smoke on the edge of the zone
+  if frame % 2 == 0 then
+    addPart(lz.x + lz.r - 3 + random(-1, 1), lz.y - 3, (random() - 0.5) * 0.4, -2 - random(), random(8, 16), (random() < 0.6) and S.R or S.O)
+  end
+  if lz.hold >= EXTRACT_HOLD then C.extract() return end
+  -- stay too long and the Reaper comes
+  if s >= REAPER_AT and not R.reaper then
+    local x, y = C.spawnPos()
+    if x then
+      R.reaper = C.spawnMob("reaper", x, y)
+      say("THE REAPER HAS COME FOR YOU  -  get to the chopper!", 150, S.R)
+      sfx("boss")
+    end
+  end
+  if R.reaper then R.reaper.speed = 1.6 + 0.2 * (s - REAPER_AT) / 60 end
+end
+
+function C.extract()
+  state = "evac"
+  R.extracted = true
+  R.evacT = 0
+  R.score = R.score + 5000
+  say("EXTRACTED!", 80, S.g)
+  sfx("level")
+end
+
+-- where the chopper is drawn: flying in while you hold the zone, then away
+function C.chopperPos()
+  local lz = R.lz
+  if not lz then return nil end
+  if state == "evac" then
+    local t = R.evacT or 0
+    if t < 10 then return lz.x, lz.y - 24 + t end
+    return lz.x + (t - 10) * 2, lz.y - 14 - (t - 10) * 3
+  end
+  if lz.hold <= 0 then return nil end
+  local q = 1 - lz.hold / EXTRACT_HOLD
+  return lz.x + q * 260, lz.y - 24 - q * 120
 end
 
 ---------------------------------------------------------------------- level-up / chest / death
@@ -1859,6 +1985,11 @@ function C.finishRun()
   R.deadTimer = 0
   local mins = secs() / 60
   local souls = ((R.soulPts or 0) + 25 * R.bossKills + (R.bonusSouls or 0)) * stats.souls * Tree.prestigeSouls(prof.prestige)
+  -- extraction: +100 souls, then x1.5 on everything
+  if R.extracted then
+    souls = (souls + 100 * stats.souls * Tree.prestigeSouls(prof.prestige)) * 1.5
+    prof.extracts = (prof.extracts or 0) + 1
+  end
   R.soulsEarned = floor(souls)
   prof.souls = prof.souls + R.soulsEarned
   prof.soulsTotal = (prof.soulsTotal or 0) + R.soulsEarned
@@ -2246,6 +2377,8 @@ local function update()
   C.updateSpellObjects()
   C.updatePickups()
   C.updateSpawns()
+  C.updateExtract(secs())
+  if state ~= "play" then return end
   C.updateOutposts(secs())
   if R.tick % 5 == 0 then C.updateBases(secs()) end
   C.updateSurvivor(secs())
@@ -2403,6 +2536,33 @@ local function renderWorld()
     end
   end
 
+  -- landing zone: dashed ring, a big H, a progress arc while you hold it
+  if R.lz then
+    local lz = R.lz
+    local n = 40
+    for k = 0, n - 1 do
+      local a = k / n * 2 * pi
+      local rx, ry = lz.x + cos(a) * lz.r - camX, lz.y + sin(a) * lz.r * 0.8 - camY
+      if (k + floor(frame / 3)) % 4 < 2 then
+        scr.pixel(rx, ry, lz.inside and S.W or S.Y); scr.pixel(rx + 1, ry, lz.inside and S.W or S.Y)
+      else
+        scr.pixel(rx, ry, S.K)
+      end
+    end
+    local q = lz.hold / EXTRACT_HOLD
+    for k = 0, floor(q * 60) do
+      local a = k / 60 * 2 * pi - pi / 2
+      scr.pixel(lz.x + cos(a) * (lz.r - 3) - camX, lz.y + sin(a) * (lz.r - 3) * 0.8 - camY, S.W)
+    end
+    local hx, hy = floor(lz.x - 4 - camX), floor(lz.y - 6 - camY)
+    scr.rect(hx, hy, 2, 12, S.Y); scr.rect(hx + 6, hy, 2, 12, S.Y); scr.rect(hx, hy + 5, 8, 2, S.Y)
+    -- chopper shadow
+    local cx, cy = C.chopperPos()
+    if cx and (state == "evac" and R.evacT < 20 or q > 0.6) then
+      for xx = -10, 10, 2 do scr.pixel(lz.x + xx - camX, lz.y + 10 - camY, S.K) end
+    end
+  end
+
   -- corpses: death animation, then the body lies there and fades
   for _, c in ipairs(R.corpses) do
     local n = #c.a
@@ -2499,8 +2659,15 @@ local function renderWorld()
       elseif (m.shockT or 0) > 0 and frame % 4 < 2 then tint = S.Y end
       if m.flash > 0 then tint = S.W end
       if m.fuse and m.fuse % 4 < 2 then tint = S.W end
-      if m.elite and not tint and (frame + m.phase) % 10 < 3 then tint = S.O end
-      addDraw(sp, x, y + bob, m.flip, tint, m.y)
+      if m.elite and not tint and (frame + m.phase) % 10 < 3 then tint = m.affix and S[AFFIX[m.affix].col] or S.O end
+      if m.def.reaper then
+        -- the Reaper always draws on top, trailing black smoke
+        tint = (frame % 16 < 2) and S.R or nil
+        if frame % 2 == 0 then addPart(m.x + random(-10, 10), m.y - random(2, 30), 0, -0.3, random(6, 12), (random() < 0.5) and S.K or S.D) end
+        addDraw(sp, x, y + bob, m.flip, tint, m.y + 5000)
+      else
+        addDraw(sp, x, y + bob, m.flip, tint, m.y)
+      end
     end
   end
   local pa = ANIM.playerP[min(10, prof.prestige)] or ANIM.playerP[0]
@@ -2520,7 +2687,8 @@ local function renderWorld()
   local ppx, ppy = floor(p.x + 0.5) - 6, floor(p.y + 0.5) - psp.h + 1
   ppx = ppx - (ppx - camX) % 2
   ppy = ppy - (ppy - camY) % 3
-  addDraw(psp, ppx, ppy, p.flip, ptint, p.y)
+  if not (state == "evac" and R.evacT >= 8) then addDraw(psp, ppx, ppy, p.flip, ptint, p.y) end
+  UI.pcx, UI.pcy = floor((ppx - camX) / 2) + 1, floor((ppy - camY) / 3) + 1
   for i = nDraw + 1, #drawList do drawList[i] = nil end
   table.sort(drawList, zsort)
   for i = 1, nDraw do
@@ -2554,6 +2722,18 @@ local function renderWorld()
     end
     if t >= 1 and t <= 7 then circle(b.x, b.y, r * min(1, t / 5), (t < 4) and { S.Y, S.O } or { S.O, S.R }, 2) end
     if t >= 5 then circle(b.x, b.y - (t - 5), r * 0.6, { S.D, S.A }, 4) end
+  end
+
+  -- evac chopper with a spinning rotor
+  do
+    local cx, cy = C.chopperPos()
+    if cx then
+      local sx, sy = floor(cx - 15 - camX), floor(cy - 12 - camY)
+      scr.sprite(spr.chopper, sx, sy)
+      local half = (frame % 2 == 0) and 18 or 11
+      for xx = -half, half do if xx % 3 ~= 0 then scr.pixel(sx + 13 + xx, sy, S.D) end end
+      scr.pixel(sx + 30, sy + 4 + (frame % 2) * 2, S.W)
+    end
   end
 
   -- outpost HP bars
@@ -2708,6 +2888,32 @@ local function renderWorld()
       end
     end
   end
+  -- HP bars on followers and the trapped survivor
+  for _, f in ipairs(R.followers) do
+    local bx, by = floor(f.x - 6 - camX), floor(f.y - 17 - camY)
+    scr.rect(bx, by, 12, 1, S.K)
+    local fill = floor(max(0, f.hp) / f.maxHp * 12 + 0.5)
+    if fill > 0 then scr.rect(bx, by, fill, 1, (f.hp < f.maxHp * 0.35) and S.O or S.g) end
+  end
+  if R.survivor then
+    local sv = R.survivor
+    local bx, by = floor(sv.x - 6 - camX), floor(sv.y - 17 - camY)
+    scr.rect(bx, by, 12, 1, S.K)
+    local fill = floor(max(0, sv.hp) / (sv.maxHp or 10) * 12 + 0.5)
+    if fill > 0 then scr.rect(bx, by, fill, 1, (sv.hp < 4) and S.O or S.g) end
+  end
+  -- affix marks: a small coloured diamond over the elite
+  for _, m in ipairs(mobs) do
+    if m.affix and not m.dead then
+      local sp = mobFrame(m)
+      local bx, by = floor(m.x - camX), floor(m.y - sp.h - 5 - camY)
+      if bx > 0 and bx < PW and by > 12 and by < PH then
+        local c = S[AFFIX[m.affix].col]
+        scr.pixel(bx, by - 1, c); scr.pixel(bx - 1, by, c); scr.pixel(bx + 1, by, c); scr.pixel(bx, by + 1, c)
+        scr.pixel(bx, by, (frame % 10 < 5) and S.W or c)
+      end
+    end
+  end
   -- HP bars on elites and nests
   for _, m in ipairs(mobs) do
     if (m.elite or m.def.static or m.keep) and not m.dead and m.hp < m.maxHp then
@@ -2753,6 +2959,12 @@ local function hudBar(cx, cy, w, frac, col, hi, back, rows)
 end
 
 local function renderHUD()
+  -- your name over your head (text cells, so it stays sharp)
+  if UI.pcx and (state == "play" or (state == "evac" and R.evacT < 8)) then
+    local nm = prof.name
+    local nx, ny = UI.pcx + 3 - floor(#nm / 2), UI.pcy - 1
+    if ny > 4 and ny < CH - 3 and nx > 0 and nx + #nm <= CW then T(nx, ny, nm, (prof.prestige > 0) and S.Y or S.W, S.K) end
+  end
   -- top strip
   scr.rect(0, 0, PW, 9, S.K)
   for x = 0, PW - 1 do scr.pixel(x, 9, S.K); scr.pixel(x, 10, (x % 4 < 2) and S.D or S.K) end
@@ -2812,6 +3024,37 @@ local function renderHUD()
     hudBar(bx, 5, bw, max(0, R.boss.hp) / R.boss.maxHp, S.R, S.O, S.D, 2)
     row = 7
   end
+  -- extraction status
+  local s = secs()
+  local ex, exCol
+  if R.lz then
+    local lz = R.lz
+    if lz.inside or state == "evac" then
+      local bw = 40
+      local bx = floor((CW - bw) / 2) + 1
+      T(bx - 14, row, " HOLD THE LZ ", S.K, S.g)
+      hudBar(bx, row, bw, (state == "evac") and 1 or lz.hold / EXTRACT_HOLD, S.g, S.W, S.D, 2)
+      T(bx + bw + 1, row, (" %ds "):format(max(0, ceil((EXTRACT_HOLD - lz.hold) / TPS))), S.W, S.K)
+      row = row + 2
+    else
+      ex, exCol = ("EXTRACTION  -  landing zone %dm"):format(floor(sqrt((lz.x - p.x) ^ 2 + (lz.y - p.y) ^ 2) / 10)), S.g
+      -- marker on the screen edge pointing at the zone
+      local fx, fy = lz.x - camX, lz.y - camY
+      if (fx < 0 or fx > PW or fy < 12 or fy > PH) and frame % 10 < 7 then
+        fx, fy = max(4, min(PW - 10, fx)), max(14, min(PH - 22, fy))
+        scr.rect(fx - 1, fy - 1, 10, 14, S.K)
+        scr.rect(fx, fy, 2, 12, S.Y); scr.rect(fx + 6, fy, 2, 12, S.Y); scr.rect(fx, fy + 5, 8, 2, S.Y)
+      end
+    end
+    if state ~= "evac" then
+      local rt = R.reaper and "  THE REAPER HUNTS YOU" or ("  reaper in " .. fmtTime(max(0, REAPER_AT - s)))
+      ex = (ex or "") .. rt
+      if R.reaper then exCol = (frame % 10 < 5) and S.R or S.O end
+    end
+  elseif s >= EXTRACT_AT - 60 then
+    ex, exCol = "CHOPPER IN " .. fmtTime(EXTRACT_AT - s), S.A
+  end
+  if ex then center(row, " " .. ex .. " ", exCol or S.g, S.K); row = row + 2 end
   if UI.msgTimer > 0 and UI.msg ~= "" then center(row, " " .. UI.msg .. " ", UI.msgCol, S.K) end
 
   -- weapon slots (bottom centre)
@@ -2976,6 +3219,13 @@ local function drawPickCard(it, i, x0, y0, w, h)
   if spr then scr.sprite(spr, px0 + w - 24, (iconY - 1) * 3, false, R.banishMode and S.R or nil)
   else Scn.icon(Sc.itemIcon(it), px0 + w - 16, (iconY - 1) * 3 + 6, R.banishMode and S.R or rc, 4) end
   T(x0 + 1, y0 + 19, blank, S.W, S.K)
+  -- build slot: which group it fills and how full that group gets
+  if it.slot and it.max < 999 and not R.banishMode then
+    local had = owned[it.id] or 0
+    if had > 0 then line(y0 + 19, "UPGRADE", S.A)
+    elseif it.slot == "weapon" then line(y0 + 19, ("NEW WEAPON  %d/4"):format(I.weaponCount(owned) + 1), S.Y)
+    else line(y0 + 19, ("NEW %s  %d/%d"):format(I.SLOT_NAME[it.slot], I.slotCount(owned, it.slot) + 1, I.SLOTS[it.slot]), (it.slot == "spell") and S.C or S.g) end
+  end
   line(y0 + 20, it.name, S.W)
   -- owned pips / NEW
   local have = owned[it.id] or 0
@@ -2987,7 +3237,7 @@ local function drawPickCard(it, i, x0, y0, w, h)
       local c = (k <= have) and rc or ((k == have + 1) and ((frame % 12 < 6) and S.W or rc) or S.D)
       scr.rect(sx + (k - 1) * pipW, (y0 + 21 - 1) * 3 + 1, pipW - 2, 2, c)
     end
-  elseif have == 0 and it.max < 999 then
+  elseif have == 0 and it.max < 999 and not it.slot then
     line(y0 + 21, "NEW", S.g)
   end
   -- divider
@@ -3029,6 +3279,10 @@ local function renderPick()
   elseif R.offerKind == "crypt" then word, sub, col, colTop = "CRYPT", "the dead give up their treasure", S.A, S.W
   elseif R.offerKind == "bonus" then word, sub, col, colTop = "HEAD START", "free pick", S.C, S.W
   else word, sub, col, colTop = "LEVEL UP!", "level " .. (p.level - p.pending + 1), S.Y, S.W end
+  if not R.banishMode and (R.offerKind == "level" or R.offerKind == "bonus" or R.offerKind == "chest") then
+    sub = sub .. ("   -   spells %d/%d  passives %d/%d  weapons %d/4"):format(I.slotCount(owned, "spell"), I.SLOTS.spell,
+      I.slotCount(owned, "passive"), I.SLOTS.passive, I.weaponCount(owned))
+  end
   local fav = FAVOR_NAME[R.biome or "plains"]
   if fav and not R.banishMode then sub = sub .. "   -   " .. World.BIOMES[R.biome].name .. " favours " .. fav end
   -- dark ribbon across the screen behind the banner
@@ -3060,7 +3314,7 @@ local function renderPause()
   center(y0 + 1, "PAUSED", S.Y)
   T(x0 + 3, y0 + 3, "YOUR STATS", S.A)
   for i, l in ipairs(statLines()) do T(x0 + 3, y0 + 4 + i, l, S.W) end
-  T(x0 + 46, y0 + 3, "YOUR ITEMS", S.A)
+  T(x0 + 46, y0 + 3, ("YOUR ITEMS  spells %d/%d  passives %d/%d"):format(I.slotCount(owned, "spell"), I.SLOTS.spell, I.slotCount(owned, "passive"), I.SLOTS.passive), S.A)
   local items = ownedList()
   if #items == 0 then T(x0 + 46, y0 + 5, "nothing yet", S.D) end
   for i, e in ipairs(items) do
@@ -3078,8 +3332,15 @@ end
 local function renderDead()
   local w, h = 72, 30
   local x0, y0 = floor((CW - w) / 2) + 1, floor((CH - h) / 2) + 1
-  Scn.panel(x0, y0, w, h, S.R, true)
-  center(y0 + 2, "Y O U   D I E D", S.R)
+  if R.extracted then
+    Scn.panel(x0, y0, w, h, S.g, true)
+    center(y0 + 2, "E X T R A C T E D", S.g)
+    center(y0 + 3, "souls x1.5  +100  -  score +5000", S.Y)
+  else
+    Scn.panel(x0, y0, w, h, S.R, true)
+    center(y0 + 2, "Y O U   D I E D", S.R)
+    if R.reaper then center(y0 + 3, "the Reaper took you", S.A) end
+  end
   center(y0 + 5, "Survived " .. fmtTime(secs()), S.W)
   center(y0 + 6, ("Level %d    Kills %d    Bosses %d"):format(p.level, R.kills, R.bossKills), S.W)
   center(y0 + 8, "Score " .. R.score, S.Y)
@@ -3501,6 +3762,11 @@ local function main()
       frame = frame + 1
       if state == "play" then update() end
       if state == "dead" then R.deadTimer = R.deadTimer + 1 end
+      if state == "evac" then
+        R.evacT = R.evacT + 1
+        C.updateFx()
+        if R.evacT >= 50 then C.finishRun() end
+      end
       if state == "dying" then
         R.dyingT = R.dyingT + 1
         C.updateFx()
