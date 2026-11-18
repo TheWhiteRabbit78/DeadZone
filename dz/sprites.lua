@@ -476,4 +476,247 @@ S.hud_skull = {
   ".W.W.W.",
 }
 
+-- biome props (based on MiniWorld Sprites by Shade, CC0)
+S.snowpine = {
+  ".....KK.....",
+  "....KWWK....",
+  "...KWWWWK...",
+  "...KWWWWK...",
+  "..KWWWWWWK..",
+  "..KWWWWWWK..",
+  ".KWWWWWWWWK.",
+  ".KWWWWWWWWK.",
+  "KLWWWWWWWWLK",
+  "KLLWLWWWWLLK",
+  "KLLLLLLLLLLK",
+  ".KLLLLLLLLK.",
+  "..KKBBBBKK..",
+  "...KBBBBK...",
+  "...KBBBBK...",
+}
+S.snowoak = {
+  "....KKKK....",
+  "...KWWWWK...",
+  "..KWWWWWWK..",
+  "..KWWWWWWK..",
+  ".KWWWWWWWWK.",
+  ".KWWWWWWWWK.",
+  "KLWWWWWWWWLK",
+  "KLWWWWWWWWLK",
+  "KLLWWWWWWLLK",
+  "KLLLLLLLLLLK",
+  ".KLLLLLLLLK.",
+  "..KKBBBBKK..",
+  "...KBBBBK...",
+  "...KBBBBK...",
+}
+S.snowrock = {
+  "......KKKK....",
+  ".....KWWWWK...",
+  "....KAWWWWWK..",
+  "..KKKWWWWWWAK.",
+  ".KWWWAWWWWWAK.",
+  "KWWWWWAWWWAAAK",
+  "KWWWWWWAAAAAAK",
+  "KWWWWWWWAWWWWK",
+  "KAWWWWAAWWWWWK",
+  "KAWWWAWWWWWWWK",
+  "KAWWWAWWWWWAAK",
+  "KAWWWAWWWWWAAK",
+  "..WWAAWWWWWAAK",
+}
+S.cactus = {
+  "....KK....",
+  "...KYYK...",
+  "..KKYYK...",
+  ".KYKggKK..",
+  ".KgKggKYK.",
+  ".KggggKgK.",
+  ".KKKggggK.",
+  "KYKKggKKK.",
+  "KgKKggKKYK",
+  "KgggggKKgK",
+  ".KKKgggggK",
+  "...KggKKK.",
+  "...KggK...",
+}
+S.cactus2 = {
+  ".KK.KK..KK...",
+  "KYYKYYKKYYK..",
+  "KggKggKKggK..",
+  ".KgYYgKYYgK..",
+  ".KKggKKggKKK.",
+  "KYggYYKgYYgYK",
+  "KYgKggKKgggYK",
+  ".KKKgYYgYgKK.",
+  "....KgggYK...",
+  "....KggKK....",
+  "....KggK.....",
+}
+S.palm = {
+  "........KK...",
+  "...KKK.KggK..",
+  "..KZZgKggKK..",
+  ".KZZggggZZZK.",
+  "KgggggNgggggK",
+  "KgggZZgZggKK.",
+  ".KKZggggZZgK.",
+  ".KgggggggggK.",
+  ".KggNNNNNggK.",
+  ".KgKNNgNNKgK.",
+  "..K.KNNKK.KK.",
+  "...KNNNK.....",
+  "...KgggK.....",
+  "..KNNNK......",
+  "..KNNNK......",
+}
+S.palm2 = {
+  "...KK........",
+  "..KggK.KKK...",
+  "..KKggKgZZK..",
+  ".KZZZggggZZK.",
+  "KgggggNgggggK",
+  ".KKggZgZZgggK",
+  ".KgZZggggZKK.",
+  ".KgggggggggK.",
+  ".KggKKNNKggK.",
+  ".KgK.KggKKgK.",
+  ".KK..KNNK.K..",
+  ".....KNNNK...",
+  ".....KgggK...",
+  "......KNNNK..",
+  "......KNNNK..",
+}
+S.deadtree = {
+  "....K.KK.K....",
+  "...KBKBBKBK...",
+  "..KKBNBBNBKK..",
+  ".KBKKNBBNKKBK.",
+  ".KBKBKBBKBKBK.",
+  ".KBNBKBBKBNBK.",
+  ".KKKBNBBKBKKK.",
+  "KBKBKNBBNBBKBK",
+  "KBNBKKBBKKBNBK",
+  ".KKBBNBBNBBKK.",
+  "...KKKBBKKK...",
+  ".....KBBK.....",
+  ".....KBBK.....",
+  ".....KBBK.....",
+}
+S.tomb = {
+  "....KK....",
+  "..KKWWKK..",
+  "..KWAAWK..",
+  "..KAAAAK..",
+  ".KWWAAWWK.",
+  "KAWWAAWWAK",
+  "KAWWWWWWAK",
+  "KAAAAAAAAK",
+  "KAAAAAAAAK",
+  "KAAAAAAAAK",
+  "KAAAAAAAAK",
+  "KAAAAAAAAK",
+  "KAAAAAAAAK",
+}
+S.mossrock = {
+  "..KKKKK.......",
+  ".KLgggLK......",
+  "KLggggggKKKK..",
+  "KLgggggLLggLK.",
+  "KLgggggLggggLK",
+  "KLgggggLggggLK",
+  "KDLLgggLggggLK",
+  "KDAALLLLggLLLK",
+  "KDAAAADALLAADK",
+  "KDAAAADAAAAADK",
+  "..DAAADDAAAD..",
+}
+S.tumble = {
+  ".....K....",
+  ".K.KKNK.K.",
+  "KNKYYYNKYK",
+  ".KYYYYYYNK",
+  "KNYNYNNYK.",
+  "KYYYNYNYNK",
+  ".KNYNYYNK.",
+  "..KNYNNK..",
+}
+S.redrock = {
+  "..KKKKK.......",
+  ".KNOOONK......",
+  "KNOOOOOOKKKK..",
+  "KNOOOOONNOONK.",
+  "KNOOOOONOOOONK",
+  "KNOOOOONOOOONK",
+  "KBNNOOONOOOONK",
+  "KBBBNNNNOONNNK",
+  "KBBBBBBBNNBBBK",
+  "KBBBBBBBBBBBBK",
+  "..BBBBBBBBBB..",
+}
+-- biome ground decoration
+S.d_snow1 = { "A.A" }
+S.d_snow2 = { ".A", "A." }
+S.d_ice = { "C" }
+S.d_slush1 = { "WWW", ".WW" }
+S.d_slush2 = { "CC." }
+S.d_crack = { "D.", ".D" }
+S.d_sand1 = { "N.N" }
+S.d_sand2 = { ".Y", "Y." }
+S.d_bones = { "W.W", ".W." }
+S.d_crack2 = { "B..", ".BB" }
+S.d_stripe = { "OOO" }
+S.d_moss = { "Z.Z", ".Z." }
+S.d_mud = { ".BB", "BBB", "BB." }
+S.d_puddle = { ".UU", "UUU" }
+S.d_reed = { "L.L", "L.L" }
+S.d_leaf = { "g.g", "ggg" }
+S.d_fern = { "L.L", ".L." }
+S.d_flowerR = { "R" }
+S.d_flowerY = { "Y" }
+S.d_shroom = { "RR", ".W" }
+S.d_shade = { "LL", "L." }
+
+-- HUD mage weapon icons (16x6)
+S.hud_w5 = {
+  "............KKK.",
+  "...........KCWCK",
+  "KKKKKKKKKKKKCCCK",
+  "KBBBBBBBBBBKKCK.",
+  "KKKKKKKKKKKK.K..",
+  "................",
+}
+S.hud_w6 = {
+  "............KK..",
+  "KKKKKKKKKKKKCWK.",
+  "KAAAAAAAAAYKWWCK",
+  "KKKKKKKKKKKKCWK.",
+  "............KK..",
+  "................",
+}
+S.hud_w7 = {
+  "...........KKKK.",
+  "..........KYYK..",
+  "KKKKKKKKKKKYYYYK",
+  "KBBBBBBBBBAKYYK.",
+  "KKKKKKKKKKKKYK..",
+  "...........KK...",
+}
+S.hud_w8 = {
+  ".............K..",
+  "............KCK.",
+  "KKKKKKKKKKKKCWCK",
+  "KUUUUUUUUUUUKCK.",
+  "KKKKKKKKKKKK.K..",
+  "................",
+}
+S.hud_w9 = {
+  "............KK..",
+  "...........KOOK.",
+  "KKKKKKKKKKKORYOK",
+  "KNNNNNNNNNNKORK.",
+  "KKKKKKKKKKKKKK..",
+  "................",
+}
+
 return S

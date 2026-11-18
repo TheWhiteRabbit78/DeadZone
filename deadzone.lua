@@ -82,13 +82,13 @@ end
 local ANIM = {}
 do
   local src = require("dz.anims")
-  local function build(set, letter)
+  local function build(set, map)
     local out = {}
     for an, frames in pairs(set) do
       local L = {}
       for k, rows in ipairs(frames) do
         local rr = {}
-        for r, row in ipairs(rows) do rr[r] = letter and row:gsub("U", letter) or row end
+        for r, row in ipairs(rows) do rr[r] = map and row:gsub(".", map) or row end
         L[k] = G.compile(rr)
       end
       out[an] = L
@@ -97,7 +97,9 @@ do
   end
   for name, set in pairs(src) do if name ~= "player" then ANIM[name] = build(set) end end
   ANIM.playerP = {}
-  for i, letter in ipairs(PRESTIGE_SHIRT) do ANIM.playerP[i - 1] = build(src.player, letter) end
+  for i, letter in ipairs(PRESTIGE_SHIRT) do ANIM.playerP[i - 1] = build(src.player, { U = letter }) end
+  -- biome variants: recoloured copies of the base mobs (see MOB_VARIANTS)
+  ANIM.build, ANIM.src = build, src
 end
 local BLACK = G.pattern({ S.K, S.K, S.K, S.K, S.K, S.K })
 
@@ -133,6 +135,12 @@ local WEAPONS = {
   { name = "Shotgun",  dmg = 4,   cd = 16, proj = 5, fan = 0.60, jitter = 0.12, speed = 5, range = 75,  col = S.O },
   { name = "SMG",      dmg = 2.5, cd = 2,  proj = 1, fan = 0.25, jitter = 0.20, speed = 7, range = 120, col = S.W },
   { name = "Launcher", dmg = 14,  cd = 26, proj = 1, fan = 0.35, jitter = 0.00, speed = 4, range = 170, col = S.R, aoe = 22 },
+  -- mage weapons: scale with area damage and spell cooldown instead of gun stats
+  { name = "Arcane Staff", magic = "staff", dmg = 11, cd = 16, proj = 1, speed = 3.2, range = 190, col = S.C },
+  { name = "Laser Spear",  magic = "spear", dmg = 6,  cd = 9,  proj = 1, speed = 0,   range = 150, col = S.W },
+  { name = "Storm Wand",   magic = "wand",  dmg = 7,  cd = 13, proj = 1, speed = 0,   range = 120, col = S.Y },
+  { name = "Frost Staff",  magic = "frost", dmg = 5,  cd = 12, proj = 3, speed = 4.5, range = 110, col = S.C },
+  { name = "Ember Rod",    magic = "ember", dmg = 13, cd = 22, proj = 1, speed = 3.4, range = 150, col = S.O, aoe = 18 },
 }
 
 local MOBS = {
@@ -146,6 +154,69 @@ local MOBS = {
 }
 local SPAWN_ORDER = { "zombie", "ghoul", "brute", "skeleton", "bomb_imp" }
 local DEATH_COL = { zombie = S.Z, ghoul = S.A, brute = S.Z, skeleton = S.W, bomb_imp = S.R, boss = S.W }
+
+-- biome mob variants: base mob, recolour, extras (onHit = player debuff)
+local MOB_VARIANTS = {
+  frost_zombie = { "zombie", { Z = "C", N = "U" }, { onHit = "chill" } },
+  frost_ghoul  = { "ghoul", { A = "C", N = "U" }, { onHit = "chill" } },
+  yeti         = { "brute", { Z = "W", N = "A", A = "C" }, { onHit = "chill" } },
+  ice_archer   = { "skeleton", { W = "C", B = "U" }, { onHit = "chill" } },
+  frost_imp    = { "bomb_imp", { R = "U", D = "C", A = "W" }, { onHit = "chill" } },
+  mummy        = { "zombie", { Z = "W", N = "A", D = "S", R = "Y" }, {} },
+  sand_ghoul   = { "ghoul", { A = "S" }, {} },
+  sand_brute   = { "brute", { Z = "S", A = "Y" }, {} },
+  sand_archer  = { "skeleton", { W = "S" }, {} },
+  scorched     = { "zombie", { Z = "N", N = "D", R = "O" }, { onHit = "burn" } },
+  ember_ghoul  = { "ghoul", { A = "O", N = "R" }, { onHit = "burn" } },
+  magma_brute  = { "brute", { Z = "O", N = "R", A = "N" }, { onHit = "burn" } },
+  fire_archer  = { "skeleton", { W = "O", B = "R" }, { onHit = "burn" } },
+  bog_zombie   = { "zombie", { Z = "g", N = "L" }, { onHit = "poison" } },
+  bog_ghoul    = { "ghoul", { A = "Z", N = "L" }, { onHit = "poison" } },
+  bloat_brute  = { "brute", { Z = "g", N = "Z", A = "L" }, { onHit = "poison" } },
+  bog_archer   = { "skeleton", { W = "Z" }, { onHit = "poison" } },
+  vine_zombie  = { "zombie", { Z = "G", N = "g" }, { onHit = "poison" } },
+  panther      = { "ghoul", { A = "D", N = "L" }, {} },
+  woods_zombie = { "zombie", { N = "B" }, {} },
+  wolf         = { "ghoul", { N = "D" }, {} },
+}
+for name, v in pairs(MOB_VARIANTS) do
+  local d = {}
+  for k, val in pairs(MOBS[v[1]]) do d[k] = val end
+  for k, val in pairs(v[3]) do d[k] = val end
+  d.spr, d.base, d.intro = name, v[1], nil
+  MOBS[name] = d
+  DEATH_COL[name] = P.slot[v[2][({ zombie = "Z", ghoul = "A", brute = "Z", skeleton = "W", bomb_imp = "R" })[v[1]]] or "R"]
+  ANIM[name] = ANIM.build(ANIM.src[v[1]], v[2])
+end
+
+-- biome gameplay: danger scales mob HP/damage and rewards; mod = element multipliers
+local BIOME = {
+  plains     = { danger = 1, hp = 1.0,  dmg = 1.0, reward = 1.0,  col = S.g },
+  forest     = { danger = 1, hp = 1.15, dmg = 1.0, reward = 1.15, col = S.g, mod = { melee = 1.25 }, range = 0.75 },
+  swamp      = { danger = 2, hp = 1.4,  dmg = 1.2, reward = 1.4,  col = S.Z, mod = { poison = 1.5, lightning = 1.25 }, move = 0.85 },
+  snowforest = { danger = 2, hp = 1.4,  dmg = 1.2, reward = 1.4,  col = S.C, mod = { frost = 1.5, fire = 0.5 }, move = 0.85 },
+  tundra     = { danger = 3, hp = 1.8,  dmg = 1.4, reward = 1.8,  col = S.C, mod = { frost = 1.5, fire = 0.5 }, move = 0.85 },
+  desert     = { danger = 3, hp = 1.8,  dmg = 1.4, reward = 1.8,  col = S.Y, mod = { fire = 1.5, frost = 0.5 }, heat = 1 },
+  jungle     = { danger = 3, hp = 2.2,  dmg = 1.6, reward = 2.2,  col = S.g, mod = { poison = 1.5, fire = 0.75 }, range = 0.75, move = 0.9 },
+  frozenbog  = { danger = 4, hp = 2.8,  dmg = 1.8, reward = 2.8,  col = S.C, mod = { frost = 1.5, fire = 0.5 }, move = 0.8 },
+  badlands   = { danger = 4, hp = 2.8,  dmg = 1.8, reward = 2.8,  col = S.O, mod = { fire = 1.5, frost = 0.5 }, heat = 2 },
+}
+local COLD_SET = { zombie = "frost_zombie", ghoul = "frost_ghoul", brute = "yeti", skeleton = "ice_archer", bomb_imp = "frost_imp" }
+local ROSTER = {
+  forest = { zombie = "woods_zombie", ghoul = "wolf" },
+  swamp = { zombie = "bog_zombie", ghoul = "bog_ghoul", brute = "bloat_brute", skeleton = "bog_archer" },
+  jungle = { zombie = "vine_zombie", ghoul = "panther", brute = "bloat_brute", skeleton = "bog_archer" },
+  desert = { zombie = "mummy", ghoul = "sand_ghoul", brute = "sand_brute", skeleton = "sand_archer" },
+  badlands = { zombie = "scorched", ghoul = "ember_ghoul", brute = "magma_brute", skeleton = "fire_archer" },
+  tundra = COLD_SET, snowforest = COLD_SET, frozenbog = COLD_SET,
+}
+-- which damage sources count as which element (for biome modifiers)
+local ELEM = {
+  ["fire ring"] = "fire", burn = "fire", napalm = "fire", meteor = "fire",
+  ["frost nova"] = "frost", thunder = "lightning", lightning = "lightning",
+  aura = "poison", saws = "melee", thorns = "melee",
+  ["frost staff"] = "frost", ["ember rod"] = "fire", ["storm wand"] = "lightning",
+}
 local SPELLS = { "firering", "meteor", "frost", "thunder", "orbs" }
 
 ---------------------------------------------------------------------- sound
@@ -229,7 +300,11 @@ local function giveItem(id)
   local it = I.byId[id]
   if not it then return end
   owned[id] = (owned[id] or 0) + 1
-  if it.weapon then p.unlocked[it.weapon] = true end
+  if it.weapon and #p.slots < 4 then
+    local have = false
+    for _, w in ipairs(p.slots) do if w == it.weapon then have = true end end
+    if not have then p.slots[#p.slots + 1] = it.weapon end
+  end
   if I.hasHpMod(it) then p.hpOrder[#p.hpOrder + 1] = id end
 end
 
@@ -239,7 +314,7 @@ local function newRun()
     x = 0, y = 0, vx = 0, vy = 0, knx = 0, kny = 0, fx = 1, fy = 0, flip = false,
     hp = 10, maxHp = 10, cd = 0, iframes = 0,
     xp = 0, level = 1, xpNext = xpFor(1), pending = 0, bonus = 0,
-    weapon = 1, unlocked = { true, false, false, false },
+    weapon = 1, slots = { 1 },
     regenT = 0, drainT = 0, sawA = 0, auraT = 0, auraFlash = 0, moving = false,
     shieldT = 0, retalT = 0, revUsed = 0, thornT = 0, hpOrder = {},
   }
@@ -275,6 +350,7 @@ local function newRun()
   end
   recompute()
   p.hp = p.maxHp
+  if _G.DZ_TELEPORT then _G.DZ_TELEPORT(p, world) end  -- test hook (desktop tests only)
   R.rerolls = floor(stats.rerolls + 0.5)
   R.banishes = floor(stats.banish + 0.5)
   p.bonus = floor(stats.headstart + 0.5)
@@ -382,6 +458,11 @@ end
 
 function C.damageMob(m, dmg, kx, ky, raw, src)
   if m.dead then return end
+  if src then
+    local e = ELEM[src]
+    local bm = e and R.bmod and R.bmod[e]
+    if bm then dmg = dmg * bm end
+  end
   if not raw then
     dmg = dmg * R.mult * (1 - R.res)
     if (m.shockT or 0) > 0 then dmg = dmg * (1.25 + stats.conductor) end
@@ -539,8 +620,10 @@ function C.killMob(m)
     m.numAcc = 0
   end
   R.kills = R.kills + 1
-  R.score = R.score + m.def.score * (m.elite and 3 or 1)
-  C.dropGem(m.x, m.y - 4, m.def.xp * (1 + secs() / 400) * (m.elite and 4 or 1))
+  local rw = m.reward or 1
+  R.bonusKills = (R.bonusKills or 0) + (rw - 1)
+  R.score = R.score + floor(m.def.score * (m.elite and 3 or 1) * rw)
+  C.dropGem(m.x, m.y - 4, m.def.xp * (1 + secs() / 400) * (m.elite and 4 or 1) * rw)
   burst(m.x, m.y - 6, 8, DEATH_COL[m.kind] or S.R, 1.4)
   burst(m.x, m.y - 6, 4, S.R, 0.8)
   local an = ANIM[m.def.spr]
@@ -570,8 +653,10 @@ function C.killMob(m)
     R.boss = nil
     C.explode(m.x, m.y - 10, 30, 0, {})
   else
-    local r = random()
-    if r < 0.025 * stats.drops then
+    local r = random() / (m.reward or 1)
+    if (m.reward or 1) > 1.5 and random() < 0.002 * (m.reward or 1) then
+      pickups[#pickups + 1] = { x = m.x, y = m.y, kind = "chest", ttl = 60 * TPS }
+    elseif r < 0.025 * stats.drops then
       pickups[#pickups + 1] = { x = m.x, y = m.y, kind = "heart", ttl = 30 * TPS }
     elseif r < 0.032 * stats.drops then
       pickups[#pickups + 1] = { x = m.x, y = m.y, kind = "magnet", ttl = 30 * TPS }
@@ -586,12 +671,17 @@ function C.killMob(m)
 end
 
 function C.spawnMob(kind, x, y)
+  local bio = world.biomeAt(x, y)
+  local B = BIOME[bio] or BIOME.plains
+  local roster = ROSTER[bio]
+  if roster and roster[kind] then kind = roster[kind] end
   local d = MOBS[kind]
   local s = secs()
   local m = {
     kind = kind, def = d, x = x, y = y,
-    hp = d.hp * hpMul(s), speed = d.speed * speedMul(s) * (0.9 + random() * 0.2),
+    hp = d.hp * hpMul(s) * B.hp, speed = d.speed * speedMul(s) * (0.9 + random() * 0.2),
     flash = 0, cd = random(30, 70), phase = random(0, 11), flip = false,
+    bdmg = B.dmg, reward = B.reward,
   }
   if not d.boss and not d.static and kind ~= "bomb_imp" and random() < eliteChance(s) then
     m.elite = true
@@ -635,10 +725,10 @@ end
 
 ---------------------------------------------------------------------- shooting
 function C.fire()
-  local w = WEAPONS[p.weapon]
+  local w = WEAPONS[p.slots[p.weapon] or 1]
   local proj = w.proj + floor(stats.proj + 0.5)
   local baseA = atan2(p.fy, p.fx)
-  local range = w.range * stats.range
+  local range = w.range * stats.range * (R.brange or 1)
   local ox, oy = p.x, p.y - 7
 
   -- aim assist: snap to the nearest mob within ~27 degrees of facing
@@ -655,6 +745,7 @@ function C.fire()
   end
   if bestA then baseA = bestA end
   p.recoilT, p.muzT, p.muzA = 2, 2, baseA
+  if w.magic then return C.fireMagic(w, baseA, ox, oy, range) end
 
   -- fire rate beyond 1 volley per tick and shots that don't fit under the
   -- bullet cap are not lost: they turn into extra damage on what does fire
@@ -680,6 +771,65 @@ function C.fire()
   sfx("shoot")
 end
 
+-- mage weapons
+function C.fireMagic(w, baseA, ox, oy, range)
+  local dmg = w.dmg * stats.aoedmg
+  local extra = floor(stats.proj + 0.5)
+  local kind = w.magic
+  local function crit(d)
+    if random() < stats.crit then return d * stats.critdmg end
+    return d
+  end
+  if kind == "staff" or kind == "frost" or kind == "ember" then
+    local n = min(8, w.proj + extra)
+    local spread = (kind == "frost") and 0.22 or 0.4
+    for i = 1, n do
+      local a = baseA + (i - (n + 1) / 2) * spread
+      local ca, sa = cos(a), sin(a)
+      bullets[#bullets + 1] = {
+        x = ox + ca * 6, y = oy + sa * 6, vx = ca * w.speed, vy = sa * w.speed,
+        life = floor(range / w.speed), dmg = dmg, pierce = (kind == "frost") and 1 or 0, ric = 0, hit = {},
+        col = w.col, magic = kind, homing = (kind == "staff"),
+        src = (kind == "staff") and "arcane staff" or ((kind == "frost") and "frost staff" or "ember rod"),
+        aoe = w.aoe and w.aoe * stats.area, aoeBase = w.aoe and dmg, aoeSrc = "ember rod", fire = (kind == "ember"),
+      }
+    end
+  elseif kind == "spear" then
+    -- instant beam that pierces everything on the line
+    local len = range
+    local ca, sa = cos(baseA), sin(baseA)
+    local width = 3 + extra
+    for _, m in ipairs(mobs) do
+      if not m.dead then
+        local dx, dy = m.x - ox, (m.y - 6) - oy
+        local t = dx * ca + dy * sa
+        if t > 0 and t < len and abs(dx * sa - dy * ca) < m.def.r + width then
+          C.damageMob(m, crit(dmg), ca, sa, false, "laser spear")
+        end
+      end
+    end
+    beams[#beams + 1] = { ox + ca * 6, oy + sa * 6, ox + ca * len, oy + sa * len, 3, laser = true }
+  elseif kind == "wand" then
+    -- chain lightning: first target, then jumps to nearby mobs
+    local hit = {}
+    local fx, fy = ox, oy
+    local cur = nearestMob(ox, oy, range, hit)
+    for _ = 1, 4 + extra do
+      if not cur then break end
+      hit[cur] = true
+      beams[#beams + 1] = { fx, fy, cur.x, cur.y - 6, 3, zap = true }
+      C.damageMob(cur, crit(dmg), nil, nil, false, "storm wand")
+      cur.shockT = 30
+      fx, fy = cur.x, cur.y - 6
+      cur = nearestMob(fx, fy + 6, 60, hit)
+    end
+    sfx("zap")
+  end
+  local desired = w.cd * stats.cdr
+  p.cd = p.cd + max(1, desired)
+  sfx("shoot")
+end
+
 function C.bulletHit(b, m)
   b.hit[m] = true
   local dmg = b.dmg
@@ -692,6 +842,10 @@ function C.bulletHit(b, m)
   C.damageMob(m, dmg, b.vx, b.vy, false, b.src or "gun")
   sfx("hit")
   if b.frag then return end
+  if b.magic then
+    if b.magic == "frost" and not m.dead then m.chillT = 40 end
+    return
+  end
 
   -- explosive rounds
   if stats.exround > 0 and not b.aoe then
@@ -729,6 +883,19 @@ function C.updateBullets()
   for i = #bullets, 1, -1 do
     local b = bullets[i]
     local dead = false
+    if b.homing then
+      -- arcane orbs curve towards the nearest mob
+      if not b.tgt or b.tgt.dead or frame % 6 == 0 then b.tgt = nearestMob(b.x, b.y + 6, 110, b.hit) end
+      local t = b.tgt
+      if t then
+        local want = atan2((t.y - 6) - b.y, t.x - b.x)
+        local cur = atan2(b.vy, b.vx)
+        local diff = (want - cur + pi) % (2 * pi) - pi
+        cur = cur + max(-0.22, min(0.22, diff))
+        local spd = sqrt(b.vx * b.vx + b.vy * b.vy)
+        b.vx, b.vy = cos(cur) * spd, sin(cur) * spd
+      end
+    end
     local steps = max(1, ceil(max(abs(b.vx), abs(b.vy)) / 3))
     for _ = 1, steps do
       b.x = b.x + b.vx / steps
@@ -748,7 +915,7 @@ function C.updateBullets()
       end
       if target then
         C.bulletHit(b, target)
-        if b.aoe then C.explode(b.x, b.y, b.aoe, b.aoeBase, { player = true, src = "launcher" }); dead = true; break end
+        if b.aoe then C.explode(b.x, b.y, b.aoe, b.aoeBase, { player = true, src = b.aoeSrc or "launcher", fire = b.fire }); dead = true; break end
         if b.ric > 0 then
           b.ric = b.ric - 1
           local t = nearestMob(b.x, b.y, 90, b.hit)
@@ -768,15 +935,82 @@ function C.updateBullets()
     b.life = b.life - 1
     if b.life <= 0 and not dead then
       dead = true
-      if b.aoe then C.explode(b.x, b.y, b.aoe, b.aoeBase, { player = true, src = "launcher" }) end
+      if b.aoe then C.explode(b.x, b.y, b.aoe, b.aoeBase, { player = true, src = b.aoeSrc or "launcher", fire = b.fire }) end
     end
-    if b.aoe and not dead and frame % 2 == 0 then addPart(b.x, b.y, 0, 0, 4, S.D) end
+    if b.aoe and not dead and frame % 2 == 0 then addPart(b.x, b.y, 0, 0, 4, b.fire and S.R or S.D) end
     if dead then removeAt(bullets, i) end
   end
 end
 
 ---------------------------------------------------------------------- update: player
+-- player debuffs from biome mobs
+function C.debuff(kind)
+  if kind == "chill" then p.chillT = 45
+  elseif kind == "poison" then p.poisonT = 60
+  elseif kind == "burn" then p.burnT = 40 end
+end
+
+function C.biomeText(b)
+  local B = BIOME[b]
+  local t = {}
+  local NAMES = { frost = "frost", fire = "fire", poison = "poison", lightning = "lightning", melee = "saws/thorns" }
+  for _, e in ipairs({ "frost", "fire", "poison", "lightning", "melee" }) do
+    local v = B.mod and B.mod[e]
+    if v then t[#t + 1] = NAMES[e] .. (v > 1 and " +" or " ") .. floor((v - 1) * 100 + 0.5) .. "%" end
+  end
+  if B.move then t[#t + 1] = "move " .. floor((B.move - 1) * 100 + 0.5) .. "%" end
+  if B.range then t[#t + 1] = "range " .. floor((B.range - 1) * 100 + 0.5) .. "%" end
+  if B.heat then t[#t + 1] = "HEAT" end
+  return table.concat(t, "  ")
+end
+
+function C.enterBiome(b)
+  local B = BIOME[b] or BIOME.plains
+  R.biome = b
+  R.bmod = B.mod or {}
+  R.bmove = B.move or 1
+  R.brange = B.range or 1
+  R.seenBiome = R.seenBiome or {}
+  if not R.seenBiome[b] and R.tick > 5 then
+    R.seenBiome[b] = true
+    local txt = C.biomeText(b)
+    say(World.BIOMES[b].name .. "  -  danger " .. B.danger .. (txt ~= "" and ("  -  " .. txt) or ""), 110, B.col)
+  end
+end
+
+function C.updateDebuffs()
+  local mh = p.maxHp
+  if (p.chillT or 0) > 0 then p.chillT = p.chillT - 1 end
+  if (p.poisonT or 0) > 0 then
+    p.poisonT = p.poisonT - 1
+    if p.poisonT % 10 == 0 then
+      p.hp = p.hp - mh * 0.012
+      addPart(p.x + random(-3, 3), p.y - 14, 0, -0.4, 8, S.g)
+    end
+  end
+  if (p.burnT or 0) > 0 then
+    p.burnT = p.burnT - 1
+    if p.burnT % 8 == 0 then
+      p.hp = p.hp - mh * 0.015
+      addPart(p.x + random(-3, 3), p.y - 12, 0, -0.6, 6, (random() < 0.5) and S.O or S.Y)
+    end
+  end
+  -- heat: drains HP in hot biomes, but never below a quarter
+  local B = BIOME[R.biome or "plains"]
+  if B and B.heat and R.tick % 20 == 0 and p.hp > mh * 0.25 then
+    p.hp = max(mh * 0.25, p.hp - mh * 0.01 * B.heat)
+    if R.tick % 60 == 0 then addPart(p.x + random(-4, 4), p.y - 16, 0, -0.5, 10, S.O) end
+  end
+  if p.hp <= 0 and state == "play" then
+    p.hp = 0
+    C.gameOver()
+  end
+end
+
 function C.updatePlayer()
+  local bnow = world.biomeAt(p.x, p.y)
+  if bnow ~= R.biome then C.enterBiome(bnow) end
+  C.updateDebuffs()
   local ix, iy, ax, ay = 0, 0, 0, 0
   if held[keys.a] then ix = ix - 1 end
   if held[keys.d] then ix = ix + 1 end
@@ -788,7 +1022,7 @@ function C.updatePlayer()
   if held[keys.down] then ay = ay + 1 end
 
   -- clean speeds keep scrolling smooth: 2 px straight, 1.5 px per axis diagonal
-  local spd = 2 * stats.speed
+  local spd = 2 * stats.speed * (R.bmove or 1) * (((p.chillT or 0) > 0) and 0.6 or 1)
   local tx, ty = ix * spd, iy * spd
   if ix ~= 0 and iy ~= 0 then tx, ty = tx * 0.75, ty * 0.75 end
   p.vx = p.vx + (tx - p.vx) * 0.5
@@ -905,7 +1139,8 @@ function C.updateMobs()
             local sx, sy = m.x, m.y - 8
             local tx, ty = p.x - sx, p.y - 7 - sy
             local l = sqrt(tx * tx + ty * ty)
-            eshots[#eshots + 1] = { x = sx, y = sy, vx = tx / l * 2.6, vy = ty / l * 2.6, life = 48, dmg = 1 * mobDmg(s) * (m.elite and 1.5 or 1) }
+            eshots[#eshots + 1] = { x = sx, y = sy, vx = tx / l * 2.6, vy = ty / l * 2.6, life = 48,
+              dmg = 1 * mobDmg(s) * (m.elite and 1.5 or 1) * (m.bdmg or 1), onHit = d.onHit }
             m.atkAnim = 8
           end
         end
@@ -971,9 +1206,10 @@ function C.updateMobs()
           end
           if not d.bomb and dist < r + 5 and (m.atk or 0) <= 0 and (m.frozenT or 0) <= 0 then
             local before = p.hp
-            C.hurtPlayer(d.dmg * mobDmg(s) * (m.elite and 1.5 or 1))
+            C.hurtPlayer(d.dmg * mobDmg(s) * (m.elite and 1.5 or 1) * (m.bdmg or 1))
             if (m.atkAnim or 0) <= 0 then m.atkAnim = 10 end
             if p.hp < before then
+              if d.onHit then C.debuff(d.onHit) end
               m.atk = d.heavy and 40 or 20
               if d.heavy then
                 m.stun = 25
@@ -994,7 +1230,9 @@ function C.updateEShots()
     e.life = e.life - 1
     local dx, dy = p.x - e.x, (p.y - 7) - e.y
     if dx * dx + dy * dy < 36 then
+      local before = p.hp
       C.hurtPlayer(e.dmg)
+      if e.onHit and p.hp < before then C.debuff(e.onHit) end
       removeAt(eshots, i)
     elseif e.life <= 0 then
       removeAt(eshots, i)
@@ -1387,7 +1625,9 @@ function C.choose(i)
     return
   end
   giveItem(it.id)
-  if it.weapon then p.weapon = it.weapon end
+  if it.weapon then
+    for i, w in ipairs(p.slots) do if w == it.weapon then p.weapon = i end end
+  end
   recompute()
   if it.heal then p.hp = min(p.maxHp, p.hp + it.heal) end
   say(it.name .. "!", 40, P.slot[I.RARITY[it.rarity].col])
@@ -1409,7 +1649,7 @@ function C.finishRun()
   state = "dead"
   R.deadTimer = 0
   local mins = secs() / 60
-  local souls = (R.kills / 10 + 5 * mins + 25 * R.bossKills) * stats.souls * Tree.prestigeSouls(prof.prestige)
+  local souls = ((R.kills + (R.bonusKills or 0)) / 10 + 5 * mins + 25 * R.bossKills) * stats.souls * Tree.prestigeSouls(prof.prestige)
   R.soulsEarned = floor(souls)
   prof.souls = prof.souls + R.soulsEarned
   prof.soulsTotal = (prof.soulsTotal or 0) + R.soulsEarned
@@ -1920,6 +2160,8 @@ local function renderWorld()
   if state ~= "dying" then
     if p.iframes > 0 and frame % 4 < 2 then ptint = S.R end
     if p.retalT > 0 and frame % 6 < 2 then ptint = S.O end
+    if (p.chillT or 0) > 0 and frame % 8 < 3 then ptint = S.C end
+    if (p.poisonT or 0) > 0 and frame % 8 < 2 then ptint = S.g end
   end
   -- keep the player on the text-cell grid so its details stay crisp
   local ppx, ppy = floor(p.x + 0.5) - 6, floor(p.y + 0.5) - psp.h + 1
@@ -1940,7 +2182,10 @@ local function renderWorld()
     scr.pixel(mx, my, S.W)
     scr.pixel(mx + ca, my + sa, S.Y); scr.pixel(mx + ca * 2, my + sa * 2, S.O)
     scr.pixel(mx - sa, my + ca, S.Y); scr.pixel(mx + sa, my - ca, S.Y)
-    if p.weapon == 2 or p.weapon == 4 then
+    local wid = p.slots[p.weapon]
+    if WEAPONS[wid].magic then
+      scr.pixel(mx, my, S.C); scr.pixel(mx + ca, my + sa, S.W)
+    elseif wid == 2 or wid == 4 then
       scr.pixel(mx + ca * 3, my + sa * 3, S.O); scr.pixel(mx + ca - sa, my + sa + ca, S.O); scr.pixel(mx + ca + sa, my + sa - ca, S.O)
     end
   end
@@ -1996,6 +2241,15 @@ local function renderWorld()
 
   for _, b in ipairs(bullets) do
     local bx, by = b.x - camX, b.y - camY
+    if b.magic == "staff" then
+      scr.pixel(bx, by, S.W); scr.pixel(bx + 1, by, S.C); scr.pixel(bx - 1, by, S.C)
+      scr.pixel(bx, by + 1, S.C); scr.pixel(bx, by - 1, S.C)
+      scr.pixel(bx - b.vx, by - b.vy, S.U)
+    elseif b.magic == "frost" then
+      scr.pixel(bx, by, S.W); scr.pixel(bx - b.vx * 0.3, by - b.vy * 0.3, S.C); scr.pixel(bx - b.vx * 0.6, by - b.vy * 0.6, S.C)
+    elseif b.magic == "ember" then
+      scr.pixel(bx, by, S.Y); scr.pixel(bx + 1, by, S.O); scr.pixel(bx - 1, by, S.O); scr.pixel(bx, by + 1, S.O); scr.pixel(bx, by - 1, S.R)
+    end
     scr.pixel(bx, by, b.col)
     if b.aoe then scr.pixel(bx - b.vx * 0.5, by - b.vy * 0.5, S.O)
     elseif not b.frag then scr.pixel(bx - b.vx * 0.3, by - b.vy * 0.3, b.col) end
@@ -2038,6 +2292,19 @@ local function renderWorld()
       for k = 1, steps do
         local nx = b[1] + (b[3] - b[1]) * k / steps + ((k < steps) and random(-4, 4) or 0)
         local ny = b[2] + (b[4] - b[2]) * k / steps
+        line(x, y, nx, ny, (b[5] % 2 == 0) and S.Y or S.W)
+        x, y = nx, ny
+      end
+    elseif b.laser then
+      -- bright core with a cyan glow either side
+      line(b[1], b[2] - 1, b[3], b[4] - 1, S.C)
+      line(b[1], b[2] + 1, b[3], b[4] + 1, S.C)
+      line(b[1], b[2], b[3], b[4], (b[5] >= 2) and S.W or S.C)
+    elseif b.zap then
+      local x, y = b[1], b[2]
+      for k = 1, 4 do
+        local nx = b[1] + (b[3] - b[1]) * k / 4 + ((k < 4) and random(-3, 3) or 0)
+        local ny = b[2] + (b[4] - b[2]) * k / 4 + ((k < 4) and random(-3, 3) or 0)
         line(x, y, nx, ny, (b[5] % 2 == 0) and S.Y or S.W)
         x, y = nx, ny
       end
@@ -2104,6 +2371,12 @@ local function renderHUD()
   -- level + XP
   T(2, 3, "LV", S.A, S.K)
   T(5, 3, tostring(p.level), S.Y, S.K)
+  -- biome
+  local bio = R.biome or "plains"
+  local B = BIOME[bio]
+  local bname = World.BIOMES[bio].name
+  T(9, 3, bname, B.col, S.K)
+  T(10 + #bname, 3, ("danger %d  rewards x%.1f"):format(B.danger, B.reward), (B.danger >= 3) and S.R or S.A, S.K)
   hudBar(7, 2, 40, p.xp / p.xpNext, S.C, S.W, S.D, 2)
   T(48, 2, ("%d / %d xp"):format(floor(p.xp), p.xpNext), S.A, S.K)
   -- timer (big pixel digits) + kills
@@ -2145,14 +2418,15 @@ local function renderHUD()
   local sy = CH - 2
   for i = 1, 4 do
     local x = sx0 + (i - 1) * (slotW + gap)
-    local un = p.unlocked[i]
+    local wid = p.slots[i]
+    local un = wid ~= nil
     local act = i == p.weapon
     local fc = act and S.Y or (un and S.A or S.D)
     -- interior: number + weapon picture
     T(x, sy, tostring(i), act and S.Y or (un and S.W or S.D), S.K)
     T(x, sy + 1, " ", S.W, S.K)
     scr.rect(x * 2, (sy - 1) * 3, (slotW - 1) * 2, 6, S.K)
-    if un then scr.sprite(spr["hud_w" .. i], x * 2 + 2, (sy - 1) * 3, false, (not act) and S.A or nil)
+    if un then scr.sprite(spr["hud_w" .. wid], x * 2 + 2, (sy - 1) * 3, false, (not act) and S.A or nil)
     else T(x + 3, sy, "----", S.D, S.K) end
     Scn.frame((x - 2) * 2, (sy - 2) * 3, (slotW + 2) * 2, 4 * 3, fc, act)
   end
@@ -2161,6 +2435,10 @@ local function renderHUD()
   if stats.shield >= 1 then st[#st + 1] = { (p.shieldT >= C.shieldCd()) and "SHIELD" or "shield", (p.shieldT >= C.shieldCd()) and S.C or S.D } end
   if stats.revive >= 1 then st[#st + 1] = { "REVIVE " .. (floor(stats.revive + 0.5) - p.revUsed), S.Y } end
   if #R.followers > 0 then st[#st + 1] = { "ALLIES " .. #R.followers .. "/2", S.g } end
+  if (p.chillT or 0) > 0 then st[#st + 1] = { "CHILLED", S.C } end
+  if (p.poisonT or 0) > 0 then st[#st + 1] = { "POISONED", S.g } end
+  if (p.burnT or 0) > 0 then st[#st + 1] = { "BURNING", S.O } end
+  if BIOME[R.biome or "plains"].heat and p.hp > p.maxHp * 0.25 then st[#st + 1] = { "HEAT", S.O } end
   local x = sx0 - 4
   for i = #st, 1, -1 do
     x = x - #st[i][1] - 2
@@ -2713,8 +2991,8 @@ local function onKey(k)
     elseif k == keys.p then state = "paused"
     elseif NUM[k] then
       local n = NUM[k]
-      if p.unlocked[n] then p.weapon = n; say(WEAPONS[n].name, 25, S.W)
-      else say("Weapon " .. n .. " is locked - find it in level-up items", 40, S.A) end
+      if p.slots[n] then p.weapon = n; say(WEAPONS[p.slots[n]].name, 25, S.W)
+      else say("Slot " .. n .. " is empty - weapons come from level-up items", 40, S.A) end
     end
   elseif state == "pick" then
     local n = NUM[k]

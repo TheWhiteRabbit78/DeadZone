@@ -62,9 +62,14 @@ I.LIST = {
   { id = "plate",   name = "Armor Plate",   rarity = "rare", max = 3, mods = { armor = 1.5, speed_pct = -0.08 }, lines = { "+1.5 armor", "!-8% move speed" } },
   { id = "saw",     name = "Buzzsaw",       rarity = "rare", max = 4, mods = { saws = 1 },               lines = { "+1 saw spinning around you" } },
   { id = "aura",    name = "Toxic Aura",    rarity = "rare", max = 4, mods = { aura = 1 },               lines = { "Poison pulse hurts mobs near you" } },
-  { id = "w2",      name = "Shotgun",       rarity = "rare", max = 1, mods = {}, weapon = 2, lines = { "New weapon on key 2", "5 pellets, short range" } },
-  { id = "w3",      name = "SMG",           rarity = "rare", max = 1, mods = {}, weapon = 3, lines = { "New weapon on key 3", "Bullet hose" } },
-  { id = "w4",      name = "Launcher",      rarity = "rare", max = 1, mods = {}, weapon = 4, lines = { "New weapon on key 4", "Explosive rockets" } },
+  { id = "w2",      name = "Shotgun",       rarity = "rare", max = 1, mods = {}, weapon = 2, lines = { "New weapon", "5 pellets, short range" } },
+  { id = "w3",      name = "SMG",           rarity = "rare", max = 1, mods = {}, weapon = 3, lines = { "New weapon", "Bullet hose" } },
+  { id = "w4",      name = "Launcher",      rarity = "rare", max = 1, mods = {}, weapon = 4, lines = { "New weapon", "Explosive rockets" } },
+  { id = "staff",   name = "Arcane Staff",  rarity = "rare", max = 1, mods = {}, weapon = 5, lines = { "New mage weapon", "Slow homing orbs", "Scales with area damage", "and spell cooldown" } },
+  { id = "spear",   name = "Laser Spear",   rarity = "rare", max = 1, mods = {}, weapon = 6, lines = { "New mage weapon", "Instant beam, pierces all", "Scales with area damage", "and spell cooldown" } },
+  { id = "wand",    name = "Storm Wand",    rarity = "rare", max = 1, mods = {}, weapon = 7, lines = { "New mage weapon", "Lightning jumps 5 targets", "Scales with area damage", "and spell cooldown" } },
+  { id = "fstaff",  name = "Frost Staff",   rarity = "rare", max = 1, mods = {}, weapon = 8, lines = { "New mage weapon", "Shard fan that slows", "Scales with area damage", "and spell cooldown" } },
+  { id = "ember",   name = "Ember Rod",     rarity = "rare", max = 1, mods = {}, weapon = 9, lines = { "New mage weapon", "Exploding fireballs", "Scales with area damage", "and spell cooldown" } },
   -- explosion line
   { id = "exround", name = "Explosive Rounds", rarity = "rare", max = 3, mods = { exround = 1, rate_pct = -0.15 }, lines = { "Bullets blast on hit", "!-15% fire rate" } },
   { id = "bigbang", name = "Big Bang",      rarity = "rare", max = 4, mods = { area_pct = 0.25 },        lines = { "+25% explosion and spell size" } },
@@ -123,7 +128,7 @@ I.LIST = {
 local SPELLS_CD = { "meteor", "frost", "thunder", "orbs" }
 local FIRE = { "firering", "meteor", "napalm", "inferno" }
 local BOOMS = { "w4", "exround", "mortar", "meteor", "corpse", "spike" }
-local AREA = { "w4", "exround", "mortar", "corpse", "spike", "aura", "firering", "meteor", "frost", "thunder", "orbs", "napalm", "shrap" }
+local AREA = { "w4", "staff", "spear", "wand", "fstaff", "ember", "exround", "mortar", "corpse", "spike", "aura", "firering", "meteor", "frost", "thunder", "orbs", "napalm", "shrap" }
 local NEEDS = {
   conductor = { "thunder", "coil" },
   permafrost = { "frost" },
@@ -239,8 +244,16 @@ function I.armorReduction(armor)
   return armor / (armor + 6)
 end
 
+-- you carry at most 4 weapons (the pistol is always one of them)
+function I.weaponCount(owned)
+  local n = 1
+  for _, it in ipairs(I.LIST) do if it.weapon and (owned[it.id] or 0) > 0 then n = n + 1 end end
+  return n
+end
+
 local function available(it, owned, banned)
   if banned and banned[it.id] then return false end
+  if it.weapon and I.weaponCount(owned) >= 4 then return false end
   if (owned[it.id] or 0) >= it.max then return false end
   if it.needsAny then
     local has = false

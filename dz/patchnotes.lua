@@ -2,9 +2,24 @@
 
 local N = {}
 
-N.VERSION = "v2.70"
+N.VERSION = "v2.80"
 
 N.LIST = {
+  { "v2.80", "Biomes + mage weapons", {
+    "9 biomes, laid out like Minecraft: temperature + humidity",
+    "  Cold: Snow Tundra, Snowy Forest, Frozen Bog",
+    "  Mild: Plains, Forest, Swamp     Hot: Desert, Badlands, Jungle",
+    "  Snow never touches desert - there's always mild land between",
+    "Each biome has its own ground, trees, rocks and mobs",
+    "Danger 1-4: harder mobs but more XP, souls, score and chests",
+    "Biome modifiers: snow boosts frost, desert boosts fire, etc.",
+    "Cold mobs chill you, swamp mobs poison, badlands mobs burn",
+    "Snow and bogs slow you down, desert and badlands HEAT drains HP",
+    "Frozen lakes you can walk on, oases in the desert",
+    "Weapons are items now: carry up to 4, keys 1-4 switch",
+    "5 mage weapons: Arcane Staff, Laser Spear, Storm Wand,",
+    "  Frost Staff, Ember Rod - they scale with area damage",
+  } },
   { "v2.70", "Everything moves", {
     "New animated sprites: player, zombie, ghoul, brute, skeleton,",
     "  bomb imp and the Grave King - walk cycles and attack swings",

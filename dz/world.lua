@@ -17,6 +17,40 @@ local RW, RH = 48, 40             -- one prop chance per region of this size
 local DECO_GRID = 8
 local LW, LH = 360, 300           -- one lake chance per region of this size
 local OW, OH = 640, 520           -- one outpost chance per region of this size
+local BLK = 8                     -- biome lookup block size (pixels)
+
+-- Biomes come from two smooth noise maps, temperature and humidity (like
+-- Minecraft). Temperature changes gradually, so cold and hot biomes always
+-- have a mild band between them - snow never touches desert.
+--   cold: tundra / snowforest / frozenbog
+--   mild: plains / forest / swamp
+--   hot:  desert / badlands / jungle
+W.BIOMES = {
+  plains     = { name = "PLAINS",        ground = "G", props = 0.22, set = { "oak", 0.4, "pine", 0.75, "rock", 1 },
+                 deco = 0.30, decos = { "tuft1", "tuft2", "tuft3", "d_flowerY", "d_flowerR" } },
+  forest     = { name = "FOREST",        ground = "G", props = 0.5,  set = { "oak", 0.45, "pine", 0.95, "rock", 1 },
+                 deco = 0.40, decos = { "tuft1", "d_shade", "d_fern", "d_shroom", "tuft2" } },
+  swamp      = { name = "SWAMP",         ground = "L", props = 0.2,  set = { "deadtree", 0.45, "mossrock", 0.75, "tomb", 1 },
+                 deco = 0.45, decos = { "d_moss", "d_mud", "d_reed", "d_puddle", "d_puddle" } },
+  desert     = { name = "DESERT",        ground = "S", props = 0.13, set = { "cactus", 0.4, "cactus2", 0.7, "deadtree", 0.85, "redrock", 1 },
+                 deco = 0.22, decos = { "d_sand1", "d_sand2", "d_sand1", "d_bones", "tumble" } },
+  badlands   = { name = "BADLANDS",      ground = "N", props = 0.18, set = { "redrock", 0.6, "deadtree", 1 },
+                 deco = 0.30, decos = { "d_crack2", "d_stripe", "d_crack2", "d_bones", "d_stripe" } },
+  jungle     = { name = "JUNGLE",        ground = "G", props = 0.42, set = { "palm", 0.45, "palm2", 0.9, "mossrock", 1 },
+                 deco = 0.55, decos = { "d_leaf", "d_fern", "d_shade", "d_flowerR", "d_flowerY" } },
+  tundra     = { name = "SNOW TUNDRA",   ground = "W", props = 0.1,  set = { "snowrock", 0.6, "snowpine", 1 },
+                 deco = 0.22, decos = { "d_snow1", "d_snow2", "d_ice", "d_snow1", "d_ice" } },
+  snowforest = { name = "SNOWY FOREST",  ground = "W", props = 0.45, set = { "snowpine", 0.6, "snowoak", 0.95, "snowrock", 1 },
+                 deco = 0.25, decos = { "d_snow1", "d_snow2", "d_snow2", "d_ice", "d_snow1" } },
+  frozenbog  = { name = "FROZEN BOG",    ground = "A", props = 0.14, set = { "snowrock", 0.5, "snowoak", 1 },
+                 deco = 0.45, decos = { "d_slush1", "d_slush2", "d_crack", "d_slush1", "d_ice" } },
+}
+W.BIOME_GRID = {
+  { "tundra", "snowforest", "frozenbog" },
+  { "plains", "forest", "swamp" },
+  { "desert", "badlands", "jungle" },
+}
+W.COLD = { tundra = true, snowforest = true, frozenbog = true }
 
 function W.new(spr, seed)
   local self = {}
@@ -26,16 +60,77 @@ function W.new(spr, seed)
   self.plain = plain
 
   local DECO = {
-    G.compile({ "g.g", ".g." }),
-    G.compile({ "g..", ".g.", ".g." }),
-    G.compile({ ".g", "g.", "g." }),
-    G.compile({ "Y" }),
-    G.compile({ "R" }),
+    tuft1 = G.compile({ "g.g", ".g." }),
+    tuft2 = G.compile({ "g..", ".g.", ".g." }),
+    tuft3 = G.compile({ ".g", "g.", "g." }),
   }
+  local function decoSpr(name) return DECO[name] or spr[name] end
 
   local function hash(x, y, k)
     local n = sin(x * 127.1 + y * 311.7 + (seed + k) * 74.7) * 43758.5453
     return n - floor(n)
+  end
+
+  -- biomes -----------------------------------------------------------------
+  local function vnoise(x, y, k)
+    local x0, y0 = floor(x), floor(y)
+    local fx, fy = x - x0, y - y0
+    fx, fy = fx * fx * (3 - 2 * fx), fy * fy * (3 - 2 * fy)
+    local a, b = hash(x0, y0, k), hash(x0 + 1, y0, k)
+    local c, d = hash(x0, y0 + 1, k), hash(x0 + 1, y0 + 1, k)
+    local top = a + (b - a) * fx
+    return top + (c + (d - c) * fx - top) * fy
+  end
+  local function climate(x, y)
+    local t = 0.78 * vnoise(x / 2200, y / 2200, 101) + 0.22 * vnoise(x / 800, y / 800, 102)
+    local h = 0.78 * vnoise(x / 1900, y / 1900, 201) + 0.22 * vnoise(x / 700, y / 700, 202)
+    t, h = (t - 0.5) * 1.7 + 0.5, (h - 0.5) * 1.6 + 0.5
+    -- the start area is always calm plains
+    local d = sqrt(x * x + y * y)
+    if d < 1400 then
+      local w = min(1, (1400 - d) / 700)
+      t, h = t + (0.5 - t) * w, h + (0.3 - h) * w
+    end
+    return t, h
+  end
+  self.climate = climate
+  local function classify(t, h)
+    local col = (t < 0.235) and 1 or ((t > 0.755) and 3 or 2)
+    local row = (h < 0.46) and 1 or ((h > 0.73) and 3 or 2)
+    return W.BIOME_GRID[col][row]
+  end
+  local blkCache, blkRows = {}, 0
+  local function biomeBlock(bx, by)
+    local row = blkCache[by]
+    if not row then
+      if blkRows > 4000 then blkCache, blkRows = {}, 0 end
+      row = {}
+      blkCache[by] = row
+      blkRows = blkRows + 1
+    end
+    local b = row[bx]
+    if not b then
+      b = classify(climate(bx * BLK + 4, by * BLK + 4))
+      row[bx] = b
+    end
+    return b
+  end
+  function self.biomeAt(x, y) return biomeBlock(floor(x / BLK), floor(y / BLK)) end
+  local biomeAt = self.biomeAt
+  -- stable per-pixel jitter so borders are ragged instead of blocky
+  local JIT = {}
+  for i = 0, 255 do JIT[i] = floor(hash(i, 7, 909) * 11) - 5 end
+  local function biomeJit(x, y)
+    local j = JIT[(x % 16) * 16 + (y % 16)]
+    local k = JIT[(y % 16) * 16 + ((x + 5) % 16)]
+    return biomeBlock(floor((x + j) / BLK), floor((y + k) / BLK))
+  end
+  -- solid ground pattern per biome
+  local groundPat, groundCol = {}, {}
+  for id, b in pairs(W.BIOMES) do
+    local c = s[b.ground]
+    groundCol[id] = c
+    groundPat[id] = G.pattern({ c, c, c, c, c, c })
   end
 
   -- lakes ----------------------------------------------------------------------
@@ -63,6 +158,8 @@ function W.new(spr, seed)
           x1, y1 = max(x1, c[1] + r + 4), max(y1, c[2] + r + 4)
         end
         lk.x0, lk.y0, lk.x1, lk.y1 = x0, y0, x1, y1
+        lk.biome = biomeAt(cx, cy)
+        lk.frozen = W.COLD[lk.biome] or false
         -- lily pads inside, reeds on the shore
         lk.lilies, lk.reeds = {}, {}
         for i = 1, 6 do
@@ -141,10 +238,14 @@ function W.new(spr, seed)
     if d == nil then
       local r = hash(gx, gy, 0)
       d = false
-      if r < 0.30 then
-        local kind = (r < 0.28) and (1 + floor(r * 100) % 3) or (r < 0.29 and 4 or 5)
-        local x, y = gx * DECO_GRID + floor(hash(gx, gy, 1) * 6), gy * DECO_GRID + floor(hash(gx, gy, 2) * 6)
-        if waterEdge(x, y) > 4 then d = { DECO[kind], x, y } end
+      local x, y = gx * DECO_GRID + floor(hash(gx, gy, 1) * 6), gy * DECO_GRID + floor(hash(gx, gy, 2) * 6)
+      local bd = W.BIOMES[biomeAt(x, y)]
+      if r < bd.deco then
+        local list = bd.decos
+        local name = list[1 + floor(hash(gx, gy, 3) * #list)]
+        -- the last two entries are the rare ones
+        if r > bd.deco * 0.025 and (name == list[4] or name == list[5]) then name = list[1 + floor(hash(gx, gy, 4) * 3)] end
+        if waterEdge(x, y) > 4 then d = { decoSpr(name), x, y } end
       end
       row[gx] = d
     end
@@ -162,12 +263,17 @@ function W.new(spr, seed)
     end
     return pt
   end
+  local SHORE = { desert = s.g, badlands = s.g, tundra = s.A, snowforest = s.A, frozenbog = s.W, swamp = s.B, jungle = s.S }
   local function subColour(lk, x, y)
     local d = lakeEdge(lk, x, y)
-    if d < 0 then return s.U elseif d < 2.5 then return s.S else return s.G end
+    if d < 0 then return lk.frozen and s.C or s.U
+    elseif d < 2.5 then return SHORE[lk.biome] or s.S
+    else return groundCol[biomeAt(x, y)] end
   end
+  local ice = G.pattern({ s.C, s.C, s.C, s.C, s.C, s.C })
 
   local viewLakes = {}
+  local bgrid, ugrid, colIdx, rowIdx = {}, {}, {}, {}
   function self.drawGround(scr, camX, camY)
     -- lakes overlapping the view
     local nv = 0
@@ -182,8 +288,50 @@ function W.new(spr, seed)
     end
     for i = nv + 1, #viewLakes do viewLakes[i] = nil end
 
-    if nv == 0 then
-      scr.fillBase(function() return plain end)
+    -- ground: one solid pattern per biome. A block whose 8 neighbours are the
+    -- same biome is drawn solid; cells near a border are worked out per pixel
+    -- (with a little jitter so the edge looks natural)
+    local bx0, by0 = floor(camX / BLK) - 2, floor(camY / BLK) - 2
+    local nbx, nby = floor(scr.PW / BLK) + 6, floor(scr.PH / BLK) + 6
+    for iy = 0, nby - 1 do
+      for ix = 0, nbx - 1 do bgrid[iy * nbx + ix] = biomeBlock(bx0 + ix, by0 + iy) end
+    end
+    for iy = 1, nby - 2 do
+      for ix = 1, nbx - 2 do
+        local i = iy * nbx + ix
+        local a = bgrid[i]
+        if bgrid[i - 1] == a and bgrid[i + 1] == a and bgrid[i - nbx] == a and bgrid[i + nbx] == a
+          and bgrid[i - nbx - 1] == a and bgrid[i - nbx + 1] == a and bgrid[i + nbx - 1] == a and bgrid[i + nbx + 1] == a then
+          ugrid[i] = groundPat[a]
+        else
+          ugrid[i] = false
+        end
+      end
+    end
+    -- whole view inside one biome: every cell is the same pattern
+    local only = ugrid[2 * nbx + 2]
+    if only then
+      for iy = 2, nby - 3 do
+        for ix = 2, nbx - 3 do
+          if ugrid[iy * nbx + ix] ~= only then only = nil; break end
+        end
+        if not only then break end
+      end
+    end
+    for cx = 0, scr.CW - 1 do colIdx[cx] = floor((camX + cx * 2 + 1) / BLK) - bx0 end
+    for cy = 0, scr.CH - 1 do rowIdx[cy] = (floor((camY + cy * 3 + 1) / BLK) - by0) * nbx end
+    local function land(wx, wy, cx, cy)
+      local u = only or ugrid[rowIdx[cy] + colIdx[cx]]
+      if u then return u end
+      return shorePattern(
+        groundCol[biomeJit(wx, wy)], groundCol[biomeJit(wx + 1, wy)],
+        groundCol[biomeJit(wx, wy + 1)], groundCol[biomeJit(wx + 1, wy + 1)],
+        groundCol[biomeJit(wx, wy + 2)], groundCol[biomeJit(wx + 1, wy + 2)])
+    end
+    if nv == 0 and only then
+      scr.fillBase(function() return only end)
+    elseif nv == 0 then
+      scr.fillBase(function(cx, cy) return land(camX + cx * 2, camY + cy * 3, cx, cy) end)
     else
       scr.fillBase(function(cx, cy)
         local wx, wy = camX + cx * 2, camY + cy * 3
@@ -191,7 +339,7 @@ function W.new(spr, seed)
           local lk = viewLakes[i]
           if wx + 2 > lk.x0 and wx < lk.x1 and wy + 3 > lk.y0 and wy < lk.y1 then
             local d = lakeEdge(lk, wx + 1, wy + 1.5)
-            if d < -3 then return water end
+            if d < -3 then return lk.frozen and ice or water end
             if d < 5 then
               return shorePattern(
                 subColour(lk, wx + 0.5, wy + 0.5), subColour(lk, wx + 1.5, wy + 0.5),
@@ -200,7 +348,7 @@ function W.new(spr, seed)
             end
           end
         end
-        return plain
+        return land(wx, wy, cx, cy)
       end)
     end
 
@@ -217,6 +365,7 @@ function W.new(spr, seed)
   function self.drawLakeDecor(scr, camX, camY, frame)
     for i = 1, self.nViewLakes or 0 do
       local lk = self.viewLakes[i]
+      if not lk.frozen then
       for _, l in ipairs(lk.lilies) do scr.sprite(spr.lily, l[1] - 2 - camX, l[2] - 2 - camY) end
       for _, r in ipairs(lk.reeds) do scr.sprite(spr.reed, r[1] - 2 - camX, r[2] - 4 - camY) end
       -- sparkles drift slowly and change every second
@@ -226,6 +375,7 @@ function W.new(spr, seed)
         local a = hash(k, t, 7) * 6.283
         local d = hash(k, t, 8) * (c[3] - 8)
         scr.sprite(spr.sparkle, c[1] + math.cos(a) * d - camX + (frame % 20) * 0.2, c[2] + math.sin(a) * d - camY)
+      end
       end
     end
   end
@@ -244,16 +394,22 @@ function W.new(spr, seed)
     if pr == nil then
       pr = false
       local r = hash(rx, ry, 11)
-      if r < 0.22 then
-        local kind = (r < 0.09) and "oak" or (r < 0.17 and "pine" or "rock")
+      local bd = W.BIOMES[biomeAt(rx * RW + RW / 2, ry * RH + RH / 2)]
+      if r < bd.props then
+        local q = r / bd.props
+        local set = bd.set
+        local kind = set[#set - 1]
+        for i = 1, #set, 2 do if q < set[i + 1] then kind = set[i]; break end end
         local sp = spr[kind]
         local x = rx * RW + floor(hash(rx, ry, 12) * (RW - sp.w))
         local y = ry * RH + floor(hash(rx, ry, 13) * (RH - sp.h))
         local bx, by, br
-        if kind == "rock" then
+        if kind:find("rock") then
           bx, by, br = x + sp.w / 2, y + sp.h - 3, 5
+        elseif kind == "tumble" or kind == "tomb" then
+          bx, by, br = x + sp.w / 2, y + sp.h - 2, 3
         else
-          bx, by, br = x + sp.w / 2, y + sp.h - 2, (kind == "oak") and 3 or 2
+          bx, by, br = x + sp.w / 2, y + sp.h - 2, (kind == "oak" or kind == "snowoak") and 3 or 2
         end
         if bx * bx + by * by > 70 * 70 and waterEdge(bx, by) > 12 and not self.nearOutpost(bx, by, 60) then
           pr = { spr = sp, x = x, y = y, bx = bx, by = by, br = br, z = y + sp.h }
@@ -360,7 +516,7 @@ function W.new(spr, seed)
     local n = lakesNear(x, y, pushLakes)
     for i = 1, n do
       local lk = pushLakes[i]
-      if x > lk.x0 - r and x < lk.x1 + r and y > lk.y0 - r and y < lk.y1 + r then
+      if not lk.frozen and x > lk.x0 - r and x < lk.x1 + r and y > lk.y0 - r and y < lk.y1 + r then
         for _ = 1, 2 do
           for _, c in ipairs(lk.circles) do
             local dx, dy = x - c[1], y - c[2]
